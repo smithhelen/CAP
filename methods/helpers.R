@@ -1,0 +1,47 @@
+## Helper functions for Ranger methods
+
+# Load libraries
+library(FactoMineR) #for CA function within hat()
+library(factoextra) #for get_ca_row function within hat()
+
+# This is equivalent of scale(t(scale(t(x), scale=FALSE)),scale=FALSE)
+# This is used in the cmdscale function
+# To calculate Gower's B matrix
+dbl_center <- function(x)
+{
+  x <- as.matrix(x)
+  center1 <- colMeans(t(x), na.rm=TRUE)
+  x <- sweep(t(x), 2L, center1, FUN = "-", check.margin=FALSE)
+  center2 <- colMeans(t(x), na.rm=TRUE)
+  x <- sweep(t(x), 2L, center2, FUN = "-", check.margin=FALSE)
+  x
+}
+
+
+# A version of eigen() that maintains rownames on the eigenvectors
+eigen_decomp <- function(X, symmetric) {
+  E <- eigen(X, symmetric)
+  rownames(E$vectors) <- rownames(X)
+  colnames(E$vectors) <- paste0("V", 1:nrow(E$vectors))
+  E
+}
+
+# Hat function
+hat <- function(ct, k){
+  ca1 <- CA(ct, ncp=k, graph=FALSE) #requires FactoMineR
+  capX <- get_ca_row(ca1)$coord #requires factoextra
+  centX <- sweep(as.matrix(capX), 2, colMeans(as.matrix(capX)), '-')
+  H <- centX %*% solve(t(centX) %*% centX) %*% t(centX) 
+  H
+}
+
+# Filter out eigenvalues based on some criteria
+filter_eigenvalues <- function(ev, axes = NULL, mp = 100) {
+  if(is.null(axes)){
+    VarExp <- cumsum(ev/sum(ev)*100)
+    axes <- min(which(VarExp > mp))
+  }
+  axes <- min(axes, length(ev))
+  ev[seq_len(axes)]
+}
+
