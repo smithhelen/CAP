@@ -24,8 +24,8 @@ importance_CA.zero1 <- var_impt_fn(Dat.train, method="ca0", axes=1)
 importance_CA.zero2 <- var_impt_fn(Dat.train, method="ca0", axes=2)
 importance_PCO1 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="pco", axes=1)
 importance_PCO2 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="pco", axes=2) 
-importance_CAP1 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="cap", axes=1)
-importance_CAP2 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="cap", axes=2) 
+importance_CAP1 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=1)
+importance_CAP2 <- var_impt_fn(Dat.train, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=2) 
 
 ## Merge data sets
 importance <- bind_rows(CA.zero1 = importance_CA.zero1 %>% slice(1:10) %>% select(gene) %>% mutate(imp = c(1:10)),

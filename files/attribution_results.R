@@ -25,8 +25,8 @@ attribution_jc_CA.zero1 <- attribution_fn(Dat.train, Dat.test, method="ca0", axe
 attribution_jc_CA.zero2 <- attribution_fn(Dat.train, Dat.test, method="ca0", axes=2)
 attribution_jc_PCO1 <- attribution_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=1)
 attribution_jc_PCO2 <- attribution_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2)
-attribution_jc_CAP1 <- attribution_fn(Dat.train, Dat.test, mp=95, d=list_of_distance_matrices, method="cap", axes=1)
-attribution_jc_CAP2 <- attribution_fn(Dat.train, Dat.test, mp=95, d=list_of_distance_matrices, method="cap", axes=2)
+attribution_jc_CAP1 <- attribution_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=1)
+attribution_jc_CAP2 <- attribution_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2)
 
 # Merge data sets 
 attribution_jc_cgMLST <- list(

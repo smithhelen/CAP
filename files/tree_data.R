@@ -30,8 +30,8 @@ cgMLST_CA.zero1_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, method="ca0", ax
 cgMLST_CA.zero2_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, method="ca0", axes=2))
 cgMLST_PCO1_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="pco", axes=1))
 cgMLST_PCO2_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="pco", axes=2))
-cgMLST_CAP1_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="cap", axes=1))
-cgMLST_CAP2_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="cap", axes=2))
+cgMLST_CAP1_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=1))
+cgMLST_CAP2_jc <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=2))
 
 # Merge data sets
 results_cgMLST_jc <- bind_rows(CA1=cgMLST_CA.zero1_jc |> bind_rows(.id = "Fold"), 
@@ -49,7 +49,7 @@ load("../CAP_Data/results/results_cgMLST_jc.Rdata")
 ## 2. try different mp values to determine number of axes
 #mp_list <- list(0,50,85,95,99)
 mp_list <- list(95)
-cgMLST_CAP_jc <- map(mp_list, function(z) map2(Dat.train, Dat.test, ~tree_fn(.x,.y,mp=z,d=list_of_distance_matrices, method="cap")))
+cgMLST_CAP_jc <- map(mp_list, function(z) map2(Dat.train, Dat.test, ~tree_fn(.x,.y,mp=z,d=list_of_distance_matrices, method="cap", k=2, axes=2)))
 
 # check which answer_CAP_jc in the list is for mp=95
 map(cgMLST_CAP_jc, ~.x |> map("mp") |> unlist() |> unique())

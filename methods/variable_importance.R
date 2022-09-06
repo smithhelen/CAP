@@ -3,7 +3,7 @@
 # as it uses the OOB data but is a simple way to check if the same data is being used for the different methods (not CAP yet)
 # use on whole training at once (as per attribution function)
 
-var_impt_fn <- function(Dat.train, d=NULL, axes=2, mp=99, method=ca0, ntrees=500){
+var_impt_fn <- function(Dat.train, method=ca0, d=NULL, k=2, m=NULL, mp=99, axes=2, ntrees=500){
   switch(method, 
          ca0 = {
            train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes)
@@ -12,7 +12,7 @@ var_impt_fn <- function(Dat.train, d=NULL, axes=2, mp=99, method=ca0, ntrees=500
            train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d, axes=axes)
          },
          cap = {
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, mp=mp, axes=axes)
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, k=k, m=m, mp=mp, axes=axes)
          }
   )       
   set.seed(3)

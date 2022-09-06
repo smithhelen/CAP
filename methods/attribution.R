@@ -1,20 +1,20 @@
 #### Source attribution of the SACNZ data (jejuni and coli) using the different methods ####
 
 # Attribution 
-attribution_fn <- function(Dat.train, Dat.test, d, mp=99, method=ca0, ntrees=500, axes=1){
+attribution_fn <- function(Dat.train, Dat.test, d, method=ca0, ntrees=500, k=2, m=NULL, mp=100, axes=2){
   switch(method, 
          # prepare data using method of choice:
          ca0 = {
            train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes)
-           test <- prepare_test_ca0(Dat.test, train$extra, LabID)
+           test <- prepare_test_ca0(Dat.test, train$extra, "LabID")
          },
          pco = {
            train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d, axes=axes)
-           test <- prepare_test_pco(Dat.test, train$extra, LabID)
+           test <- prepare_test_pco(Dat.test, train$extra, "LabID")
          },
          cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=NULL, mp=mp)
-           test <- prepare_test_cap(Dat.test, train$extra, LabID)
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, k=k, m=m, mp=mp, axes=axes)
+           test <- prepare_test_cap(Dat.test, train$extra, "LabID")
          }
   )       
   set.seed(3)

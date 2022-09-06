@@ -35,8 +35,8 @@ MC_CA.zero1 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=1)
 MC_CA.zero2 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2)
 MC_PCO1 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=1)
 MC_PCO2 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2)
-MC_CAP1 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", axes=1)
-MC_CAP2 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", axes=2)
+MC_CAP1 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=1)
+MC_CAP2 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, m=2, axes=2)
 MC_results <- list(CA.zero1=MC_CA.zero1, PCO1=MC_PCO1, PCO2=MC_PCO2, CAP1=MC_CAP1, CAP2=MC_CAP2)
 save(MC_results, file="../CAP_Data/results/MC_results.Rdata") # run ???
 load("../CAP_Data/results/MC_results.Rdata")
@@ -51,7 +51,7 @@ MC_results |> map_dfr("conf.se") |> mutate(method = names(MC_results),.before=1)
 ## 3. try different mp values to determine number of axes
 #mp_list <- list(0,50,85,95,99)
 mp_list <- list(95)
-MC_CAP <- map(mp_list, function(z) map2(Dat.train, Dat.test, ~misclass_fn(.x,.y,mp=z,d=list_of_distance_matrices, method="cap")))
+MC_CAP <- map(mp_list, function(z) map2(Dat.train, Dat.test, ~misclass_fn(.x,.y,mp=z, k=2,d=list_of_distance_matrices, method="cap")))
 
 
 

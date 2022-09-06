@@ -18,7 +18,7 @@ misclass_tree_fn <- function(dat){
 
   
 # (2) - calculate proportion correct classifications for forests (ie calculate misclassification rate)
-MC_fn <- function(Dat.train, Dat.test, d, axes=1, mp=99, method=ca0, ntrees=500){
+MC_fn <- function(Dat.train, Dat.test, method, d, k, m, mp, axes, ntrees){
   switch(method, 
          ca0 = {
            train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes)
@@ -29,7 +29,7 @@ MC_fn <- function(Dat.train, Dat.test, d, axes=1, mp=99, method=ca0, ntrees=500)
            test <- prepare_test_pco(Dat.test, train$extra, "LabID")
          },
          cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=NULL, mp=mp)
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, k=k, m=m, mp=mp)
            test <- prepare_test_cap(Dat.test, train$extra, "LabID")
          }
   )       
@@ -73,14 +73,14 @@ calc_misclassification <- function(df) {
   out
 }
 
-misclass_fn <- function(Dat.train, Dat.test, method=ca0, d=NULL, axes=2){
+misclass_fn <- function(Dat.train, Dat.test, method=ca0, d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500){
   switch(method,
          cap = {
            cat("Not ready for CAP yet")
            return()
          },
          {
-           DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, axes=axes), .id="Fold")
+           DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, k=k, m=m, mp=mp, axes=axes, ntrees=ntrees), .id="Fold")
            answer <- calc_misclassification(DF)
            answer
          }
