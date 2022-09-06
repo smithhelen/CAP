@@ -94,14 +94,14 @@ read_PRIMER_txt <- function(gene){
   data <- read_tsv(paste0("../CAP_data/PRIMER/CAP_",{{gene}},".txt")) |>
     select(c(starts_with("CAP")),Allele) |> as.data.frame() |>
     rename_with(~gsub("CAP","V",.x,fixed=TRUE), starts_with("CAP")) |>
-    relocate(Allele)
+    relocate(Var_level = Allele)
   data
 }
 
 P_results <- map(vars, read_PRIMER_txt) |> setNames(vars)
 
 check_diff <- function(R_result, P_result){
-  vars <- as.list(colnames(R_result |> select(starts_with("V"))))
+  vars <- as.list(colnames(R_result |> select(-1) |> select(starts_with("V"))))
   check <- function(var){
     R <- R_result |> select({{var}})
     P <- P_result |> select({{var}})
@@ -110,6 +110,7 @@ check_diff <- function(R_result, P_result){
   diff <- map(vars, check)
   diff |> unlist()
 }
-map2(P_results, R_results, check_diff)
+map2(R_results, P_results, check_diff)
+# gives teeny teeny tiny differences (e-17) ie they are the same :-)
 
 
