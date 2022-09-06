@@ -50,53 +50,49 @@ capd.fun <- function(d, gene, train, test){
 
 # adjust R CAP method to give output we need to check
 source("methods/cap.R") 
-prepare_test_cap <- function(data, extra) {
-  gene_cols <- data |> select(any_of(names(extra)))
-  newdata_score <- map2(gene_cols, extra, impute_score_cap)
-  CAP_score <- map(newdata_score,"allele_score")
+
+P_prepare_test_cap <- function(data, extra, id) {
+  id <- data |> select({{id}})
+  var_cols <- data |> select(any_of(names(extra)))
+  newdata_score <- map2(var_cols, extra, P_impute_score_cap)
+  # extra line for comparing Primer results
+  CAP_score <- map(newdata_score,"var_level_score")
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
+  newdata_pred <- bind_cols(id, newdata_pred)
+  # list to output extra results for Primer compare
   list(newdata_pred=newdata_pred, CAP_score=CAP_score)
 }
-impute_score_cap <- function(gene, extra) {
-  alleles <- pluck(extra, "alleles")
-  gene <- droplevels(gene)
-  new.alleles <- setdiff(levels(gene), alleles)
+
+P_impute_score_cap <- function(var, extra) {
+  var_levels <- pluck(extra, "var_levels")
+  var <- droplevels(var)
+  new.var_levels <- setdiff(levels(var), var_levels)
   d <- pluck(extra, "d")
-  B.train <- pluck(extra, "B.train")
+  diag.B.train <- pluck(extra, "diag.B.train")
   lambda_B <- pluck(extra, "lambda_B")
-  Q <- pluck(extra, "Q")
-  Q_score <- pluck(extra, "Q_score")
+  Qo <- pluck(extra, "Qo")
+  C_score <- pluck(extra, "C_score")
   U <- pluck(extra, "U")
   lambda_QHQ <- pluck(extra, "lambda_QHQ")
-  axes <- pluck(extra, "axes")
-  new_scores <- map_df(new.alleles, ~predict_cap(new.allele = {.}, d, B.train, Q, lambda_B, lambda_QHQ, U, axes))
-  allele_score <- rbind(data.frame(Q_score) |> rownames_to_column("Allele"), new_scores)
-  list(allele_score = allele_score,
-       test_score = data.frame(Allele = gene) |> 
-         left_join(allele_score, by = "Allele") |>
-         select(-Allele))
-}
-predict_cap <- function(new.allele, d, B.train, Q, lambda_B, lambda_QHQ, U, axes) {
-  # new.allele is length one
-  d.new <- d[new.allele, colnames(B.train)]
-  d.gower <- diag(B.train) - (d.new ^ 2)
-  X <- sweep(Q, 2, sqrt(abs(lambda_B[1:axes])), "*")
-  newX <- d.gower %*% X / (2 * lambda_B[1:axes])
-  newQ <- newX / sqrt(abs(lambda_B[1:axes]))
-  newQscore <- newQ %*% U * sqrt(abs(lambda_QHQ))
-  new_allele_score <- data.frame(Allele = new.allele, newQscore)
-  new_allele_score
+  new_scores <- map_df(new.var_levels, ~predict_cap(new.var_level = {.}, d, diag.B.train, Qo, lambda_B, lambda_QHQ, U))
+  # extra line for comparing Primer results
+  var_level_score <- rbind(data.frame(C_score) |> rownames_to_column("Var_level"), new_scores)
+  # extra added to list to output extra results for Primer compare
+  list(var_level_score = var_level_score,
+       test_score = data.frame(Var_level = var) |> 
+         left_join(var_level_score, by = "Var_level") |>
+         select(-Var_level))
 }
 
-prepped_train <- prepare_training_cap(Dat.train, starts_with("CAMP"), Source, dist, axes=2)
-prepped_test <- prepare_test_cap(Dat.test, prepped_train$extra)
+prepped_train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", dist, k=2, m=2, axes=2)
+prepped_test <- P_prepare_test_cap(Dat.test, prepped_train$extra, "LabID")
 R_results <- prepped_test$CAP_score
 
 # compare results against CAP_CAMPxxxx.txt files
 read_PRIMER_txt <- function(gene){
-  data <- read_tsv(paste0("PRIMER_verify/CAP_",{{gene}},".txt")) |>
-    select(!(starts_with("X") | Group)) |> as.data.frame() |>
+  data <- read_tsv(paste0("../CAP_data/PRIMER/CAP_",{{gene}},".txt")) |>
+    select(c(starts_with("CAP")),Allele) |> as.data.frame() |>
     rename_with(~gsub("CAP","V",.x,fixed=TRUE), starts_with("CAP")) |>
     relocate(Allele)
   data
