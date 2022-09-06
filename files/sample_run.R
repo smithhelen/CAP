@@ -68,7 +68,7 @@ table(Prediction) |> as.data.frame() # counts of predictions for each source
 #answer
 
 # 5. cap method, 1 axis
-train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, axes=1, mp=95)
+train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, mp=95, axes=1)
 test <- prepare_test_cap(Dat.test, train$extra, "LabID")
 rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
 Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
@@ -79,7 +79,7 @@ table(Prediction) |> as.data.frame() # counts of predictions for each source
 #answer
 
 # 6. cap method, 2 axes
-train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, axes=2, mp=95)
+train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, mp=95, axes=2)
 test <- prepare_test_cap(Dat.test, train$extra, "LabID")
 rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
 Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
@@ -88,7 +88,6 @@ table(Prediction) |> as.data.frame() # counts of predictions for each source
 #tree_preds <- predict_by_tree(rf_mod, test, uniques)
 #answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
 #answer
-
 
 
 
