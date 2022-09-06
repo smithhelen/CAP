@@ -36,12 +36,12 @@ hat <- function(ct, k){
 }
 
 # Filter out eigenvalues based on some criteria
-filter_eigenvalues <- function(ev, axes = NULL, mp = 100) {
-  if(is.null(axes)){
+filter_eigenvalues <- function(ev, m = NULL, mp = 100) {
+  if(is.null(m)){
     VarExp <- cumsum(ev/sum(ev)*100)
-    axes <- min(which(VarExp > mp))
+    m <- min(which(round(VarExp,0) >= mp)) #round to avoid rounding error leading to Inf
   }
-  axes <- min(axes, length(ev))
-  ev[seq_len(axes)]
+  m <- min(m, length(ev))
+  ev[seq_len(m)]
 }
 
