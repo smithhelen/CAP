@@ -10,7 +10,7 @@ epsilon <- sqrt(.Machine$double.eps)
 # Output is both the score information for the variable (i.e. a vector of the same length as the input vector) and
 # the level mapping data.frame (mapping from var_level to score)
 
-factor_to_CAP_score <- function(var, dist, class, m, mp, axes) {
+factor_to_CAP_score <- function(var, dist, class, k, m, mp, axes) {
   var_levels <- droplevels(var)
   N <- nlevels(var_levels)
   d.train <- dist[levels(var_levels),levels(var_levels),drop=FALSE]
@@ -24,7 +24,7 @@ factor_to_CAP_score <- function(var, dist, class, m, mp, axes) {
     return(NULL)
   }
   ct <- table(Var_level=var_levels,Class=class)
-  H <- hat(ct, k=2)
+  H <- hat(ct, k=k)
   lambda_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=m, mp=mp)
   Qo <- eigen_B$vectors[, seq_along(lambda_B), drop=FALSE]  # note that this is different to the Q score in PCO method which is scaled by the sqrt(abs(lambdas_B))
   QHQ <- t(Qo) %*% H %*% Qo   # Combine Qo and H to get C_score
@@ -32,21 +32,21 @@ factor_to_CAP_score <- function(var, dist, class, m, mp, axes) {
   # select number of axes to retain
   lambda_QHQ <- filter_eigenvalues(eigen_QHQ$values, m=axes)
   U <- eigen_QHQ$vectors[,seq_along(lambda_QHQ),drop=FALSE]
-  C_score <- Qo %*% U
+  C_score <- sweep(Qo %*% U,2,sqrt(abs(lambda_QHQ)),"*")
   # Fill Q_scores to individual isolates.  
   score <- left_join(data.frame(Var_level = var_levels), data.frame(C_score) |> rownames_to_column("Var_level"), by = "Var_level")
   Output <- score |> dplyr::select(-Var_level)
   list(output = Output,
-       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B, 
+       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B, lambda_QHQ=lambda_QHQ, 
                     U=U, Qo=Qo, C_score=C_score, num_vars = ncol(C_score), var_names = colnames(C_score)))
 }
 
-prepare_training_cap <- function(data, vars, class, d, m=NULL, mp=100, axes) {
+prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes) {
   # pull out our var_cols and class
   var_cols <- dplyr::select(data,{{vars}})
   classes   <- data |> pull({{class}})
   # iterate over the var columns and distance matrices, and convert
-  prepped <- map2(var_cols, d, factor_to_CAP_score, class = classes, m, mp, axes) |> compact() # removes empties
+  prepped <- map2(var_cols, d, factor_to_CAP_score, class = classes, k, m, mp, axes) |> compact() # removes empties
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select({{class}}) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
@@ -55,12 +55,12 @@ prepare_training_cap <- function(data, vars, class, d, m=NULL, mp=100, axes) {
        extra = extra)
 }
 
-predict_cap <- function(new.var_level, d, diag.B.train, Qo, lambda_B, U) {
+predict_cap <- function(new.var_level, d, diag.B.train, Qo, lambda_B, lambda_QHQ, U) {
   # new.var_level is length one
   d.new <- d[new.var_level, names(diag.B.train)]
   d.gower <- diag.B.train - (d.new ^ 2)
   newQo <- d.gower %*% Qo / (2 * lambda_B)
-  newCscore <- newQo %*% U
+  newCscore <- newQo %*% U * sqrt(abs(lambda_QHQ))
   new_var_score <- data.frame(Var_level = new.var_level, newCscore)
   new_var_score
 }
@@ -76,7 +76,8 @@ impute_score_cap <- function(var, extra) {
   Qo <- pluck(extra, "Qo")
   C_score <- pluck(extra, "C_score")
   U <- pluck(extra, "U")
-  new_scores <- map_df(new.var_levels, ~predict_cap(new.var_level = {.}, d, diag.B.train, Qo, lambda_B, U))
+  lambda_QHQ <- pluck(extra, "lambda_QHQ")
+  new_scores <- map_df(new.var_levels, ~predict_cap(new.var_level = {.}, d, diag.B.train, Qo, lambda_B, lambda_QHQ, U))
   var_level_score <- rbind(data.frame(C_score) |> rownames_to_column("Var_level"), new_scores)
   list(test_score = data.frame(Var_level = var) |> 
          left_join(var_level_score, by = "Var_level") |>
