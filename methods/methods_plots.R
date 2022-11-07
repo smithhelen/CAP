@@ -141,20 +141,6 @@ mp_plots <- function(dat){map_dfr(dat, function(x) {
 }
 
 
-# 4. misclassification results
-MC_plots <- function(dat){
-  dat |> 
-  map_dfr(function(x) {x |> pluck("conf") |> arrange(truths, preds)},  .id="method")  |>  
-  group_by(method, truths) |> mutate(pch=ifelse(truths==preds,21,1)) |> 
-    ggplot(aes(x=preds, y=p, group=method)) +
-  geom_point(aes(colour=method, shape=I(pch), bg=method), size=3) +
-  geom_line(aes(colour=method, lty=method)) +
-  facet_wrap(~truths) +
-  labs(x="\nPredicted Source", y="Proportion of predictions\n", subtitle = "True Source", colour = "Method", linetype = "Method", bg="Method") +
-  theme(plot.subtitle = element_text(hjust=0.5))
-}
-
-
 # 5. attribution results
 attribution_plot <- function(dat){ 
   dat |> 
