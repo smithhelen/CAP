@@ -12,7 +12,7 @@ epsilon <- sqrt(.Machine$double.eps)
 
 factor_to_CAP_score <- function(var, dist, class, k, m, mp, axes) {
   var_levels <- droplevels(var)
-  N <- nlevels(var_levels)
+  #N <- nlevels(var_levels)
   d.train <- dist[levels(var_levels),levels(var_levels),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)  #B is same as Gowers matrix G
@@ -32,16 +32,16 @@ factor_to_CAP_score <- function(var, dist, class, k, m, mp, axes) {
   # select number of axes to retain
   lambda_QHQ <- filter_eigenvalues(eigen_QHQ$values, m=axes)
   U <- eigen_QHQ$vectors[,seq_along(lambda_QHQ),drop=FALSE]
-  C_score <- sweep(Qo %*% U,2,sqrt(abs(lambda_QHQ)),"*")
-  # Fill Q_scores to individual isolates.  
+  C_score <- Qo %*% U
+  # Fill C_scores to individual isolates.  
   score <- left_join(data.frame(Var_level = var_levels), data.frame(C_score) |> rownames_to_column("Var_level"), by = "Var_level")
   Output <- score |> dplyr::select(-Var_level)
   list(output = Output,
-       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B, lambda_QHQ=lambda_QHQ, 
+       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B, 
                     U=U, Qo=Qo, C_score=C_score, num_vars = ncol(C_score), var_names = colnames(C_score)))
 }
 
-prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes) {
+prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes, residualised=NULL) {
   # pull out our var_cols and class
   var_cols <- dplyr::select(data,{{vars}})
   classes   <- data |> pull({{class}})
@@ -50,17 +50,23 @@ prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select({{class}}) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
+  if(!is.null(residualised)) {
+    prepped_data <- prepped_data |> bind_cols(data |> select({{residualised}}))
+  }
   extra <- map(prepped, "extra")
   list(training = prepped_data,
        extra = extra)
 }
 
-predict_cap <- function(new.var_level, d, diag.B.train, Qo, lambda_B, lambda_QHQ, U) {
+predict_cap <- function(new.var_level, d, diag.B.train, Qo, lambda_B, U) {
   # new.var_level is length one
   d.new <- d[new.var_level, names(diag.B.train)]
   d.gower <- diag.B.train - (d.new ^ 2)
   newQo <- d.gower %*% Qo / (2 * lambda_B)
-  newCscore <- newQo %*% U * sqrt(abs(lambda_QHQ))
+  #for plotting, the canonical variable scores are standardized by the square root of their corresponding eigenvalue (lambda_QHQ). 
+  #this is not necessary for the CAP method per se
+  #newCscore <- newQo %*% U * sqrt(abs(lambda_QHQ))
+  newCscore <- newQo %*% U
   new_var_score <- data.frame(Var_level = new.var_level, newCscore)
   new_var_score
 }
@@ -76,20 +82,24 @@ impute_score_cap <- function(var, extra) {
   Qo <- pluck(extra, "Qo")
   C_score <- pluck(extra, "C_score")
   U <- pluck(extra, "U")
-  lambda_QHQ <- pluck(extra, "lambda_QHQ")
-  new_scores <- map_df(new.var_levels, ~predict_cap(new.var_level = {.}, d, diag.B.train, Qo, lambda_B, lambda_QHQ, U))
+  new_scores <- map_df(new.var_levels, ~predict_cap(new.var_level = {.}, d, diag.B.train, Qo, lambda_B, U))
   var_level_score <- rbind(data.frame(C_score) |> rownames_to_column("Var_level"), new_scores)
   list(test_score = data.frame(Var_level = var) |> 
          left_join(var_level_score, by = "Var_level") |>
          select(-Var_level))
 }
 
-prepare_test_cap <- function(data, extra, id) {
+prepare_test_cap <- function(data, extra, id, residualised=NULL) {
   id <- data |> select({{id}})
   var_cols <- data |> select(any_of(names(extra)))
   newdata_score <- map2(var_cols, extra, impute_score_cap)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
-  newdata_pred <- bind_cols(id, newdata_pred)
+  newdata_pred <- if(!is.null(residualised)) {
+    bind_cols(id, data |> select({{residualised}}), newdata_pred)
+  } else {
+      bind_cols(id, newdata_pred)
+  }
+  newdata_pred
 }
 
