@@ -18,23 +18,29 @@ misclass_tree_fn <- function(dat){
 
   
 # (2) - calculate proportion correct classifications for forests (ie calculate misclassification rate)
-MC_fn <- function(Dat.train, Dat.test, method, d, k, m, mp, axes, ntrees){
+MC_fn <- function(Dat.train, Dat.test, method, d, k, m, mp, axes, ntrees, residualised){
   switch(method, 
          ca0 = {
-           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes)
-           test <- prepare_test_ca0(Dat.test, train$extra, "LabID")
+           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes, residualised=residualised)
+           test <- prepare_test_ca0(Dat.test, train$extra, "LabID", residualised=residualised)
          },
          pco = {
-           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d, axes=axes)
-           test <- prepare_test_pco(Dat.test, train$extra, "LabID")
+           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, residualised=residualised)
+           test <- prepare_test_pco(Dat.test, train$extra, "LabID", residualised=residualised)
          },
          cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, k=k, m=m, mp=mp)
-           test <- prepare_test_cap(Dat.test, train$extra, "LabID")
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
+           test <- prepare_test_cap(Dat.test, train$extra, "LabID", residualised=residualised)
          }
   )       
   set.seed(3)
-  ranger_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
+  ranger_mod <- if(is.null(residualised)){
+    ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
+  } else {
+    ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
+           always.split.variables = residualised)
+  }
+  
   pred <- predict(ranger_mod, data=test, predict.all = FALSE)$predictions
   df <- data.frame(preds = pred, truths = Dat.test |> pull(Source))
   df
@@ -49,7 +55,7 @@ calc_misclassification <- function(df) {
     mutate(wrong = truths != preds) |>
     group_by(Fold) |>
     summarise(miss = sum(wrong)/n()) |> 
-    lm(miss ~ 1, weights = w, data=.) |> summary()
+    lm(miss ~ 1, weights = w, data=_) |> summary()
   
   # weighted mean and standard error of the misclassification rates
   av <- coef(lm)[,"Estimate"]
@@ -73,16 +79,8 @@ calc_misclassification <- function(df) {
   out
 }
 
-misclass_fn <- function(Dat.train, Dat.test, method=ca0, d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500){
-  switch(method,
-         cap = {
-           cat("Not ready for CAP yet")
-           return()
-         },
-         {
-           DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, k=k, m=m, mp=mp, axes=axes, ntrees=ntrees), .id="Fold")
-           answer <- calc_misclassification(DF)
-           answer
-         }
-  )
+misclass_fn <- function(Dat.train, Dat.test, method=ca0, d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500, residualised=NULL){
+  DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, k=k, m=m, mp=mp, axes=axes, ntrees=ntrees, residualised=residualised), .id="Fold")
+  answer <- calc_misclassification(DF)
+  answer
 }
