@@ -20,12 +20,13 @@ is_unique <- function(data, extra) {
 }
 
 # do the tree prediction
-predict_row <- function(tree, data_row, uniques_row) {
+predict_row <- function(tree, data_row, uniques_row, residualised) {
   # pass the data down the tree row by row
   uses_unique <- 0
   prediction <- NULL
   vars_used_in_tree <- NULL
   unique_vars_used_in_tree <- NULL
+  uses_res_var <- 0
   row <- 1 # This code assumes that nodeID = row-1
   while (TRUE) {
     # split data to the left and right nodes
@@ -36,40 +37,52 @@ predict_row <- function(tree, data_row, uniques_row) {
     }
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
-    #cat(split)   # for checking errors
-    if (uniques_row[[split]]) {
-      uses_unique = uses_unique + 1
-      unique_vars_used_in_tree <- c(unique_vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
-    }
-    # go down the tree
-    if (data_row[[split]] <= tree$splitval[row]) { # Ranger uses <= here, and this gives same result
-      # left tree
-      row <- tree$leftChild[row] + 1
+   # cat(split)   # for checking errors
+    if(split == {{residualised}}){
+      uses_res_var = uses_res_var + 1
+      # go down the tree
+      if (data_row[[split]] %in% tree$splitval[row]) { 
+        # left tree
+        row <- tree$leftChild[row] + 1
+      } else {
+        # right tree
+        row <- tree$rightChild[row] + 1
+      }
     } else {
-      # right tree
-      row <- tree$rightChild[row] + 1
+      if (uniques_row[[split]]) {
+        uses_unique = uses_unique + 1
+        unique_vars_used_in_tree <- c(unique_vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
+      }
+      # go down the tree
+      if (data_row[[split]] <= tree$splitval[row]) { # Ranger uses <= here, and this gives same result
+        # left tree
+        row <- tree$leftChild[row] + 1
+      } else {
+        # right tree
+        row <- tree$rightChild[row] + 1
+      }
+      }
+      vars_used_in_tree <- c(vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
     }
-    vars_used_in_tree <- c(vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
+    tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), 
+           unique_splitting_vars=list(unique_vars_used_in_tree))
   }
-  tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), 
-         unique_splitting_vars=list(unique_vars_used_in_tree))
-}
-
-predict_tree <- function(mod, tree_number, nd, nu, id) {
+  
+predict_tree <- function(mod, tree_number, nd, nu, id, residualised) {
   #cat("working on tree", tree_number, "\n")
   tree <- treeInfo(mod, tree_number)
-  out_dfr <- map2_dfr(nd, nu, ~predict_row(tree, .x, .y))
+  out_dfr <- map2_dfr(nd, nu, ~predict_row(tree, .x, .y, residualised=residualised))
   out_dfr |>
     mutate(tree = tree_number,
            row = id)
 }
 
 # do the predictions
-predict_by_tree <- function(mod, new_data, new_unique, id) {
+predict_by_tree <- function(mod, new_data, new_unique, id, residualised) {
   nd <- split(new_data, 1:nrow(new_data))  # list, each entry is a row of test data
   nu <- split(new_unique, 1:nrow(new_unique))  # list, each entry is a row of uniques (ie TRUE or FALSE for each var)
   id = new_data |> pull({{id}})
-  predictions <- map_dfr(seq_len(mod$num.trees), ~predict_tree(mod=mod, tree_number=., nd=nd, nu=nu, id=id))
+  predictions <- map_dfr(seq_len(mod$num.trees), ~predict_tree(mod=mod, tree_number=., nd=nd, nu=nu, id=id, residualised=residualised))
   
   # BUG IN RANGER. treeInfo() produces incorrect forest levels 
   if (!is.null(mod$forest$levels)) {
@@ -109,7 +122,7 @@ tree_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, me
            always.split.variables = residualised)
   }
   #list(rf_mod=rf_mod, test=test, uniques=uniques, id=id) # for troubleshooting
-  tree_preds <- predict_by_tree(rf_mod, test, uniques, id=id)
+  tree_preds <- predict_by_tree(rf_mod, test, uniques, id=id, residualised=residualised)
   answer <- tree_preds  |> left_join(Dat.test |> rename(row = {{id}}) |> select(row, {{class}}))
   answer
 }
