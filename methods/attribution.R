@@ -18,7 +18,7 @@ attribution_fn <- function(Dat.train, Dat.test, d, method=ca0, ntrees=500, k=2, 
          }
   )       
   set.seed(3)
-  # generate random forest models and make predictions for human dataswitch(method, 
+  # generate random forest models and make predictions for human data 
   rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
   Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
   out <- table(Prediction) %>% as.data.frame() # counts of predictions for each source
