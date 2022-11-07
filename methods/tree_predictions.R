@@ -22,7 +22,6 @@ is_unique <- function(data, extra) {
 # do the tree prediction
 predict_row <- function(tree, data_row, uniques_row) {
   # pass the data down the tree row by row
-  names(uniques_row) <- names(uniques_row) |> sub("\\..*","",.)
   uses_unique <- 0
   prediction <- NULL
   vars_used_in_tree <- NULL
@@ -38,9 +37,9 @@ predict_row <- function(tree, data_row, uniques_row) {
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
     #cat(split)   # for checking errors
-    if (uniques_row[[split |> sub("\\..*","",.)]]) {
+    if (uniques_row[[split]]) {
       uses_unique = uses_unique + 1
-      unique_vars_used_in_tree <- c(unique_vars_used_in_tree, split |> sub("\\..*","",.))
+      unique_vars_used_in_tree <- c(unique_vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
     }
     # go down the tree
     if (data_row[[split]] <= tree$splitval[row]) { # Ranger uses <= here, and this gives same result
@@ -50,9 +49,10 @@ predict_row <- function(tree, data_row, uniques_row) {
       # right tree
       row <- tree$rightChild[row] + 1
     }
-    vars_used_in_tree <- c(vars_used_in_tree, split |> sub("\\..*","",.))
+    vars_used_in_tree <- c(vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
   }
-  tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), unique_splitting_vars=list(unique_vars_used_in_tree))
+  tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), 
+         unique_splitting_vars=list(unique_vars_used_in_tree))
 }
 
 predict_tree <- function(mod, tree_number, nd, nu, id) {
@@ -65,10 +65,10 @@ predict_tree <- function(mod, tree_number, nd, nu, id) {
 }
 
 # do the predictions
-predict_by_tree <- function(mod, new_data, new_unique) {
+predict_by_tree <- function(mod, new_data, new_unique, id) {
   nd <- split(new_data, 1:nrow(new_data))  # list, each entry is a row of test data
   nu <- split(new_unique, 1:nrow(new_unique))  # list, each entry is a row of uniques (ie TRUE or FALSE for each var)
-  id = new_data |> pull(id)
+  id = new_data |> pull({{id}})
   predictions <- map_dfr(seq_len(mod$num.trees), ~predict_tree(mod=mod, tree_number=., nd=nd, nu=nu, id=id))
   
   # BUG IN RANGER. treeInfo() produces incorrect forest levels 
@@ -82,4 +82,43 @@ predict_by_tree <- function(mod, new_data, new_unique) {
   }
   predictions
 }
+
+# pull out individual tree decisions for each observation
+tree_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, method=ca0, ntrees=500, residualised=NULL, id="LabID", class="Source"){
+  switch(method, 
+         ca0 = {
+           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), class="Source", axes=axes, residualised=residualised)
+           test <- prepare_test_ca0(Dat.test, train$extra, id={{id}}, residualised=residualised)
+         },
+         pco = {
+           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, residualised=residualised)
+           test <- prepare_test_pco(Dat.test, train$extra, id={{id}}, residualised=residualised)
+         },
+         cap = {  
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
+           test <- prepare_test_cap(Dat.test, train$extra, id={{id}}, residualised=residualised)
+         }
+  )       
+  uniques <- is_unique(Dat.test, train$extra)
+  set.seed(3)
+  classes <- train$training |> pull({{class}})
+  rf_mod <- if(is.null(residualised)){
+    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
+  } else {
+    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
+           always.split.variables = residualised)
+  }
+  #list(rf_mod=rf_mod, test=test, uniques=uniques, id=id) # for troubleshooting
+  tree_preds <- predict_by_tree(rf_mod, test, uniques, id=id)
+  answer <- tree_preds  |> left_join(Dat.test |> rename(row = {{id}}) |> select(row, {{class}}))
+  answer
+}
+
+
+
+## make predictions for Human data
+#predictions <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
+#table(predictions) %>% as.data.frame() # counts of predictions for each source
+
+
 
