@@ -78,15 +78,14 @@ impute_score_pco <- function(var, extra) {
 }
 
 prepare_test_pco <- function(data, extra, id, residualised=NULL) {
-  id <- data |> select({{id}})
   var_cols <- data |> select(any_of(names(extra)))
   newdata_score <- map2(var_cols, extra, impute_score_pco)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(id, data |> select({{residualised}}), newdata_pred)
+    bind_cols(data |> select({{id}},{{residualised}}), newdata_pred)
   } else {
-    bind_cols(id, newdata_pred)
+    bind_cols(data |> select({{id}}), newdata_pred)
   }
   newdata_pred
 }
