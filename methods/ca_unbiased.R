@@ -15,7 +15,7 @@ factor_to_ca0_score <- function(var, class, axes) {
   P <- rbind(ct/rowSums(ct),new)
   S <- cov.wt(P, wt = c(rowSums(ct),0))$cov
   eigen_S <- eigen_decomp(S, symmetric=TRUE) ## PCA of weighted covariance matrix of class probabilites
-  # Restrict to a maximum of eigenvectors set by "axes" (default is 1)
+  # Restrict to a maximum of eigenvectors set by "axes" (default is 2)
   nlambdas <- min(sum(eigen_S$values > epsilon), axes)
   # principal components
   pc <- eigen_S$vectors
@@ -27,9 +27,9 @@ factor_to_ca0_score <- function(var, class, axes) {
 }
 
 # iterate over the variable columns and grab the output as a new data.frame to send into ca, and store the absent level stuff for later
-prepare_training_ca0 <- function(data, var_cols, class, axes=1, residualised=NULL) {
+prepare_training_ca0 <- function(data, vars, class, axes=2, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,{{var_cols}})
+  var_cols <- dplyr::select(data,{{vars}})
   classes   <- data |> pull({{class}})
   # iterate over the var columns, and convert
   prepped <- map(var_cols, factor_to_ca0_score, class = classes, axes) |> compact()
