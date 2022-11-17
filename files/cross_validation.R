@@ -175,7 +175,7 @@ results <- reduce(list(ca,cs,a,s), right_join, by="method_long", suffix=c(".av",
   mutate(truth = str_split(T_P, "_|\\.")[[1]][1], prediction = str_split(T_P, "_|\\.")[[1]][2])
 
 # which had the best results?
-results |> filter(truth==prediction) |> group_by(method, truth) |> summarise(max(p)) |> ungroup() |> rename("p"=`max(p)`) |> arrange(desc(p))
+results |> filter(truth==prediction) |> group_by(method_long, truth) |> summarise(max(p)) |> ungroup() |> rename("p"=`max(p)`) |> arrange(desc(p))
 # method truth       p
 # CA0    Chicken 0.873
 # PCO    Chicken 0.868
@@ -193,13 +193,9 @@ results |> filter(truth==prediction & method=="CAP") |> group_by(method_long, tr
 
 
 
-
-
-
-
-## 2. Test individual tree prediction accuracy - cgMLST  # not yet run
-load("../CAP_Data/results/results_cgMLST_jc.Rdata")
-MC_all_tree <- misclass_tree_fn(results_cgMLST_jc)
+## 2. Test individual tree prediction accuracy - cgMLST  # run 8/11/23
+load("../CAP_Data/results/results_cgMLST.Rdata")
+MC_all_tree <- misclass_tree_fn(results_cgMLST)
 MC_all_tree
 # now can plot 
 
@@ -207,20 +203,26 @@ MC_all_tree
 
 
 
-
 # 3. Check against tree data   # not yet run
-dat <- results_cgMLST_jc |> 
+dat <- results_cgMLST |> 
   select(method, Fold, row, tree, Source, prediction) |> 
   group_by(method, row, Source) |> 
   mutate(Correct = ifelse(Source==prediction,1,0)) |> 
   select(-c(Correct,Fold)) |> mutate(prediction2 = 1) |> 
   pivot_wider(names_from = prediction, values_from = prediction2) |> 
   arrange(row) |> 
-  summarise(Beef=sum(Beef,na.rm=TRUE), Poultry=sum(Poultry,na.rm=TRUE), Sheep=sum(Sheep,na.rm=TRUE)) |> 
+  summarise(Cattle=sum(Cattle,na.rm=TRUE), Chicken=sum(Chicken,na.rm=TRUE), Sheep=sum(Sheep,na.rm=TRUE)) |> 
   group_by(method, row, Source) |> 
-  pivot_longer(cols=c(Beef,Poultry,Sheep)) |> 
-  summarise(max=name[which.max(value)])
-dat |> summarise(True = sum(Source==max)) |> group_by(method) |> summarise(sum(True))
-dat |> mutate(True = sum(Source==max)) |> group_by(method, Source) |> summarise(N=n(),n=sum(True),prop=n/N) |> arrange(Source,desc(prop))
+  pivot_longer(cols=c(Cattle,Chicken,Sheep), names_to = "tree_prediction", values_to = "n") |> 
+  summarise(prediction=tree_prediction[which.max(n)])
+ 
+dat |> mutate(True = sum(Source==prediction)) |> group_by(method, Source) |>
+summarise(N=n(),n=sum(True),prop=n/N)
+
+results |> filter(method_long %in% c("CA02", "PCO2", "CAP2", "CA0_CC", "PCO_CC", "CAP_CC")) |> 
+  filter(!T_P %in% c("Cattle_Cattle.se", "Chicken_Chicken.se", "Sheep_Sheep.se")) |>
+  select(-c(species, axes, residualised, level, mp, T_P)) |> filter(truth==prediction) 
 
 
+cgMLST_PCO_CC$Fold01$answer |> 
+  +     group_by(row,Source) |> count(prediction) |> slice_max(n=1, order_by = n)
