@@ -29,6 +29,7 @@ predict_row <- function(tree, data_row, uniques_row, residualised) {
   uses_res_var <- 0
   row <- 1 # This code assumes that nodeID = row-1
   while (TRUE) {
+    #    cat("row ", row, "\n")
     # split data to the left and right nodes
     if (tree$terminal[row]) {
       # terminal node - we have our answer
@@ -37,16 +38,22 @@ predict_row <- function(tree, data_row, uniques_row, residualised) {
     }
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
-   # cat(split)   # for checking errors
+    # cat(split)   # for checking errors
     if(split == {{residualised}}){
+      # NOTE: This code assumes residualised is a factor. It doesn't have to be, but
+      #       if it's not then this will break. We could probably fix this by appending another
+      #       column to tree with whether the split is an unordered variable or not. If it's
+      #       ordered it's a factor with gold-standard (bitwise matching) so should use
+      #       this branch. Else, we can use the other one.
+      # OK, let's figure out if we hit it. We hit it if 2^(split-1) is in our splitval
       uses_res_var = uses_res_var + 1
-      # go down the tree
-      if (data_row[[split]] %in% tree$splitval[row]) { 
-        # left tree
-        row <- tree$leftChild[row] + 1
-      } else {
+      # go down the tree. we use bitwise And here as the right branch is encoded as a bit pattern
+      if (bitwAnd(data_row[[split]], tree$splitval[row])) {
         # right tree
         row <- tree$rightChild[row] + 1
+      } else {
+        # left tree
+        row <- tree$leftChild[row] + 1
       }
     } else {
       if (uniques_row[[split]]) {
@@ -61,25 +68,50 @@ predict_row <- function(tree, data_row, uniques_row, residualised) {
         # right tree
         row <- tree$rightChild[row] + 1
       }
-      }
-      vars_used_in_tree <- c(vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
     }
-    tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), 
-           unique_splitting_vars=list(unique_vars_used_in_tree))
+    vars_used_in_tree <- c(vars_used_in_tree, split |> sub(pattern = "\\..*", replacement = ""))
   }
-  
+  tibble(prediction=prediction, uses_unique=uses_unique, splitting_vars=list(vars_used_in_tree), 
+         unique_splitting_vars=list(unique_vars_used_in_tree))
+}
+
+my_treeInfo <- function(mod, tree_number) {
+  tree <- treeInfo(mod, tree_number)
+  # treeInfo produces a splits column with both numeric and categorical splits, where
+  # the categorical splits are decoded from their bitpattern encoding for readability.
+  # We want the bitpattern encoding as that is the most efficient way of matching against
+  # splits, so we'll override it here:
+  tree$splitval = mod$forest$split.values[[tree_number]]
+  tree
+}
+
 predict_tree <- function(mod, tree_number, nd, nu, id, residualised) {
   #cat("working on tree", tree_number, "\n")
-  tree <- treeInfo(mod, tree_number)
+  tree <- my_treeInfo(mod, tree_number)
   out_dfr <- map2_dfr(nd, nu, ~predict_row(tree, .x, .y, residualised=residualised))
   out_dfr |>
     mutate(tree = tree_number,
-           row = id)
+           id = id)
 }
 
 # do the predictions
 predict_by_tree <- function(mod, new_data, new_unique, id, residualised) {
-  nd <- split(new_data, 1:nrow(new_data))  # list, each entry is a row of test data
+  x <- new_data
+  if (!is.null(residualised)) {
+    # need to replace our (factor) variable residualised with the corresponding
+    # integers as per ranger. Ranger uses data.matrix for this (see ranger:::predict.ranger.forest)
+    # and then encodes the integers as 2^(number-1) so it can bit-wise match
+    # the bitpattern for 'going right' down the tree. We reproduce that here.
+    
+    # Technically this doesn't need to happen in the case of residualised not being a factor though.
+    # We don't cover that case here yet, but we probably could by using mod$is.ordered: if that is false
+    # for the 'residualised' entry then we need to do this magic. If it is true, we don't, and can
+    # tree CC the same as always.
+    x[[residualised]] <- as.integer(x[[residualised]])
+    x[[residualised]] <- 2^(x[[residualised]]-1)
+  }
+  
+  nd <- split(x, 1:nrow(x))  # list, each entry is a row of test data
   nu <- split(new_unique, 1:nrow(new_unique))  # list, each entry is a row of uniques (ie TRUE or FALSE for each var)
   id = new_data |> pull({{id}})
   predictions <- map_dfr(seq_len(mod$num.trees), ~predict_tree(mod=mod, tree_number=., nd=nd, nu=nu, id=id, residualised=residualised))
@@ -88,10 +120,12 @@ predict_by_tree <- function(mod, new_data, new_unique, id, residualised) {
   if (!is.null(mod$forest$levels)) {
     # fix up the levels. We have to undo the command:
     # factor(result$prediction, levels = forest$class.values, labels = forest$levels)
+    # there is the following new code in ranger GitHub but the package is not yet updated (10/11/2022)
+    #if (!is.null(forest$levels)) { result$prediction <- integer.to.factor(result$prediction, labels = forest$levels)  }
     fixup <- data.frame(predict = mod$forest$levels[mod$forest$class.values], treeinfo = mod$forest$levels)
     predictions <- predictions |>
       left_join(fixup, by=c("prediction" = "treeinfo")) |>
-      select(row, tree, prediction = predict, uses_unique, splitting_vars, unique_splitting_vars)
+      select(id, tree, prediction = predict, uses_unique, splitting_vars, unique_splitting_vars)
   }
   predictions
 }
