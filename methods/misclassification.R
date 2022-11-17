@@ -18,32 +18,45 @@ misclass_tree_fn <- function(dat){
 
   
 # (2) - calculate proportion correct classifications for forests (ie calculate misclassification rate)
-MC_fn <- function(Dat.train, Dat.test, method, d, k, m, mp, axes, ntrees, residualised){
+MC_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, method=ca0, ntrees=500, residualised=NULL, id="LabID", class="Source"){
   switch(method, 
          ca0 = {
-           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=axes, residualised=residualised)
-           test <- prepare_test_ca0(Dat.test, train$extra, "LabID", residualised=residualised)
+           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), class="Source", axes=axes, residualised=residualised)
+           test <- prepare_test_ca0(Dat.test, train$extra, id={{id}}, residualised=residualised)
          },
          pco = {
-           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, residualised=residualised)
-           test <- prepare_test_pco(Dat.test, train$extra, "LabID", residualised=residualised)
+           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, residualised=residualised)
+           test <- prepare_test_pco(Dat.test, train$extra, id={{id}}, residualised=residualised)
          },
          cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
-           test <- prepare_test_cap(Dat.test, train$extra, "LabID", residualised=residualised)
+           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
+           test <- prepare_test_cap(Dat.test, train$extra, id={{id}}, residualised=residualised)
          }
   )       
+  uniques <- is_unique(Dat.test, train$extra) # can delete after testing
   set.seed(3)
-  ranger_mod <- if(is.null(residualised)){
-    ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
+  classes <- train$training |> pull({{class}})
+  ranger_mod <- if(is.null({{residualised}})){
+    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
   } else {
-    ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
-           always.split.variables = residualised)
+    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
+           always.split.variables = {{residualised}})
   }
+  preds_ranger <- predict(ranger_mod, data=test, predict.all = FALSE)$predictions
+  df <- data.frame(id = test |> pull({{id}}), preds = preds_ranger) |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))
   
-  pred <- predict(ranger_mod, data=test, predict.all = FALSE)$predictions
-  df <- data.frame(preds = pred, truths = Dat.test |> pull(Source))
-  df
+  tree_preds_ranger <- predict(ranger_mod, data=test, predict.all = TRUE)$predictions |> as.data.frame() |> 
+    mutate(id = test |> pull({{id}})) |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}})) |> 
+    pivot_longer(-c(id, {{class}}), names_to="tree", values_to="values") |> 
+    left_join(data.frame(values = seq_along(ranger_mod$forest$levels), prediction = ranger_mod$forest$levels)) |>  # NOTE: ranger has a mod$forest$class.values that seems though it's not supposed to be used???
+    mutate(tree = as.numeric(substring(tree, 2))) |> 
+    select(id, tree, {{class}}, prediction)
+  
+  tree_preds_JM <- predict_by_tree(ranger_mod, test, uniques, id=id, residualised=residualised) |> 
+    left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))# can delete after testing
+  
+  out <- list(MC = df, tree_preds_ranger=tree_preds_ranger, tree_preds_JM = tree_preds_JM)# replace with 'df' after testing
+  out
 }
 
 calc_misclassification <- function(df) {
@@ -79,8 +92,9 @@ calc_misclassification <- function(df) {
   out
 }
 
-misclass_fn <- function(Dat.train, Dat.test, method=ca0, d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500, residualised=NULL){
+misclass_fn <- function(Dat.train, Dat.test, method=ca0, class="Source", id="LabID", d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500, residualised=NULL){
   DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, k=k, m=m, mp=mp, axes=axes, ntrees=ntrees, residualised=residualised), .id="Fold")
-  answer <- calc_misclassification(DF)
-  answer
+  DF# can delete after testing
+  #answer <- calc_misclassification(DF) #change back after testing
+  #answer
 }
