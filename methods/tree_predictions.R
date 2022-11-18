@@ -39,7 +39,7 @@ predict_row <- function(tree, data_row, uniques_row, residualised) {
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
     # cat(split)   # for checking errors
-    if(split == {{residualised}}){
+    if(!is.null(residualised) && split == residualised){
       # NOTE: This code assumes residualised is a factor. It doesn't have to be, but
       #       if it's not then this will break. We could probably fix this by appending another
       #       column to tree with whether the split is an unordered variable or not. If it's
@@ -157,7 +157,7 @@ tree_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, me
   }
   #list(rf_mod=rf_mod, test=test, uniques=uniques, id=id) # for troubleshooting
   tree_preds <- predict_by_tree(rf_mod, test, uniques, id=id, residualised=residualised)
-  answer <- tree_preds  |> left_join(Dat.test |> rename(row = {{id}}) |> select(row, {{class}}))
+  answer <- tree_preds  |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))
   answer
 }
 
