@@ -65,23 +65,21 @@ cgMLST_PCO_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method=
 cgMLST_CAP_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method="cap", class="Source", id="LabID", k=2, mp=95, axes=2, residualised="CC"))
 
 
-
-
-
 # Merge data sets
 results_cgMLST <- bind_rows(CA0=cgMLST_CA0 |> bind_rows(.id = "Fold"), 
                             PCO=cgMLST_PCO |> bind_rows(.id = "Fold"), 
                             CAP=cgMLST_CAP |> bind_rows(.id = "Fold"), 
-                            #CA0_CC=cgMLST_CA0_CC |> bind_rows(.id = "Fold"), 
-                            #PCO_CC=cgMLST_PCO_CC |> bind_rows(.id = "Fold"), 
-                            #CAP_CC=cgMLST_CAP_CC |> bind_rows(.id = "Fold"), 
+                            CA0_CC=cgMLST_CA0_CC |> bind_rows(.id = "Fold"), 
+                            PCO_CC=cgMLST_PCO_CC |> bind_rows(.id = "Fold"), 
+                            CAP_CC=cgMLST_CAP_CC |> bind_rows(.id = "Fold"), 
                             .id="method")
-save(results_cgMLST, file = "../CAP_Data/results/results_cgMLST.Rdata")  # this was run on ...
+save(results_cgMLST, file = "../CAP_Data/results/results_cgMLST.Rdata")  # this was run on 18/11/2022
+
 
 # now can just load :-)
 load("../CAP_Data/results/results_cgMLST.Rdata")
 
-
+# and use for cross_validation.R
 
 
 
