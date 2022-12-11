@@ -193,36 +193,59 @@ results |> filter(truth==prediction & method=="CAP") |> group_by(method_long, tr
 
 
 
-## 2. Test individual tree prediction accuracy - cgMLST  # run 8/11/23
+## 2. Test individual tree prediction accuracy - (CAP_95 and CAP_CC_95 only) cgMLST  # run 18/11/23
 load("../CAP_Data/results/results_cgMLST.Rdata")
-MC_all_tree <- misclass_tree_fn(results_cgMLST)
-MC_all_tree
+# source("methods/misclassification.R") # if didn't load earlier
+MC_all_trees <- misclass_tree_fn(results_cgMLST)
+#save(MC_all_trees, file="../CAP_Data/results/MC_all_trees.Rdata")  # 25/11/2022
 # now can plot 
 
 
 
 
 
-# 3. Check against tree data   # not yet run
+# 3. Check against tree data   # run 18/11/2022
 dat <- results_cgMLST |> 
-  select(method, Fold, row, tree, Source, prediction) |> 
-  group_by(method, row, Source) |> 
+  select(method, Fold, id, tree, Source, prediction) |> 
+  group_by(method, id, Source) |> 
   mutate(Correct = ifelse(Source==prediction,1,0)) |> 
   select(-c(Correct,Fold)) |> mutate(prediction2 = 1) |> 
   pivot_wider(names_from = prediction, values_from = prediction2) |> 
-  arrange(row) |> 
+  arrange(id) |> 
   summarise(Cattle=sum(Cattle,na.rm=TRUE), Chicken=sum(Chicken,na.rm=TRUE), Sheep=sum(Sheep,na.rm=TRUE)) |> 
-  group_by(method, row, Source) |> 
+  group_by(method, id, Source) |> 
   pivot_longer(cols=c(Cattle,Chicken,Sheep), names_to = "tree_prediction", values_to = "n") |> 
   summarise(prediction=tree_prediction[which.max(n)])
  
-dat |> mutate(True = sum(Source==prediction)) |> group_by(method, Source) |>
+a <- dat |> mutate(True = sum(Source==prediction)) |> group_by(method, Source) |>
 summarise(N=n(),n=sum(True),prop=n/N)
 
-results |> filter(method_long %in% c("CA02", "PCO2", "CAP2", "CA0_CC", "PCO_CC", "CAP_CC")) |> 
+b <- results |> filter(method_long %in% c("CA02", "PCO2", "CAP2", "CA0_CC", "PCO_CC", "CAP_CC")) |> 
   filter(!T_P %in% c("Cattle_Cattle.se", "Chicken_Chicken.se", "Sheep_Sheep.se")) |>
-  select(-c(species, axes, residualised, level, mp, T_P)) |> filter(truth==prediction) 
+  select(-c(species, axes, residualised, level, mp, T_P)) |> filter(truth==prediction) |> rename(Source = truth) |> 
+  select(-method) |> rename(method=method_long) |> mutate(method=factor(method))
+b$method <- recode_factor(b$method, CA02 = "CA0")
+b$method <- recode_factor(b$method, PCO2 = "PCO")
+b$method <- recode_factor(b$method, CAP2 = "CAP")
 
-
-cgMLST_PCO_CC$Fold01$answer |> 
-  +     group_by(row,Source) |> count(prediction) |> slice_max(n=1, order_by = n)
+right_join(a, b, by=c("method", "Source")) |> select(method, Source, prop, p) |> rename(p_tree = prop, p_misscl = p)
+## they should be the same but they aren't (they are almost the same!)
+# method Source  p_tree p_misscl
+# CA0    Cattle   0.607    0.607
+# CA0    Chicken  0.844    0.844
+# CA0    Sheep    0.743    0.742  *
+# CA0_CC Cattle   0.585    0.584
+# CA0_CC Chicken  0.862    0.863  *
+# CA0_CC Sheep    0.8      0.800
+# CAP    Cattle   0.607    0.619  **
+# CAP    Chicken  0.844    0.844
+# CAP    Sheep    0.749    0.753  **
+# CAP_CC Cattle   0.612    0.612
+# CAP_CC Chicken  0.867    0.868  *
+# CAP_CC Sheep    0.776    0.777  *
+# PCO    Cattle   0.607    0.607
+# PCO    Chicken  0.849    0.853  **
+# PCO    Sheep    0.733    0.732  *
+# PCO_CC Cattle   0.599    0.598  *
+# PCO_CC Chicken  0.867    0.868  *
+# PCO_CC Sheep    0.794    0.794
