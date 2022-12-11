@@ -1,32 +1,182 @@
 #### Plots to help compare methods ###
 # Load libraries and functions
 source("methods/libs_fns.R")
-source("methods/methods_plots.R")
+library(gridExtra)
+library(ggplot2)
 
-## Load results for plotting (from tree predictions and from cross_validation) - these need to have CAP results added
-load("../CAP_Data/results/results_cgMLST_jc.Rdata")  #results_cgMLST_jc
-load("../CAP_Data/results/all_MC_results.Rdata")
-
-# to check differences between CAP with different mp values, will need to recreate results_cgMLST_jc (and for MLST data) 
-# in tree_data.R as the above are with mp=95
-
-# calculate tree misclassifications to plot tree data
-MC_all_trees <- misclass_tree_fn(results_cgMLST_jc) 
+## Load results for plotting (from tree predictions)
+load("../CAP_Data/results/MC_all_trees.Rdata")
 
 # may need to relabel sources and methods
 ### now can plot - for individual methods plots use "plots" and "mp_plots" functions; for comparative plots use "methods_plots"
 # 1. Bar plots for unique vs non-unique prediction for individual methods
-plots(MC_all_trees, method="CA.zero1")
-plots(MC_all_trees, method="CA.zero2")
-plots(MC_all_trees, method="PCO1")
-# etc
+# etc "CA0"    "CA0_CC" "CAP"    "CAP_CC" "PCO"    "PCO_CC"
+MC_all_trees |> filter(method=="CA0") |>
+    ggplot() +
+    geom_col(aes(x=uses_unique, y=prop, fill=prediction)) +
+    geom_text(aes(x=uses_unique, y=prop, group=prediction, label=paste0("n=",n)),
+              position=position_stack(vjust=0.5), size=3) +
+    geom_text(data = MC_all_trees |> filter(method=="CA0") |> group_by(method, uses_unique) |> filter(Source==prediction),
+              aes(x=uses_unique, y=1, label=paste0("N=",N)), vjust=-0.5, size=3) +
+    labs(title = ("CA0 prediction results"), subtitle="Source",
+         y="Proportion of tree predictions\n", x="\nUnique alleles used in prediction",
+         fill="Prediction") + 
+    theme(text = element_text(size=11)) + 
+    facet_wrap(~Source)
+MC_all_trees |> filter(method=="CA0") |>
+    ggplot() +
+    geom_col(aes(x=prediction, y=prop, fill=uses_unique), position="dodge") +
+    geom_text(aes(x=prediction, y=prop, group=uses_unique, label=paste0("n=",n)),
+              position=position_dodge(width=0.9), vjust=-0.5, size=3) +
+    geom_text(aes(x=prediction, y=prop, group=uses_unique, label=paste0("N=",N)),
+              position=position_dodge(width=0.9), vjust=1.5, size=3) + 
+    labs(title = ("CA0 prediction results"), y="Proportion of tree predictions\n", x="\nPrediction",
+         fill="Unique alleles", subtitle="Source") + 
+    theme(text = element_text(size=11)) + 
+    facet_wrap(~Source)
+  list(P1, P2)
 
-# 2. Side by side plots comparing prediction accuracy of different methods - will return list with 6 plots!
-methods_plots(MC_all_trees)
+
+# 2. Side by side plots comparing prediction accuracy of different methods
+p <- MC_all_trees
+p1 <- p |> mutate(pch=ifelse(Source==prediction,21,1)) |> 
+    ggplot(aes(x=prediction, y=prop, group=uses_unique)) +
+    geom_point(aes(colour=uses_unique, shape=I(pch), bg=uses_unique), size=3) +
+    geom_line(aes(colour=uses_unique, lty=uses_unique)) +
+    theme_bw(base_size = 14) + 
+    scale_y_continuous("Proportion of predictions",expand=c(0.03,0.03),limits=c(0,1)) +
+    theme(axis.text.x = element_text(angle = 90), legend.position = "top") +
+    facet_grid(Source~method, 
+               labeller=labeller(method=c(`CA0`="CA-unbiased",`CA0_CC`="CA_unbiased_CC",`PCO`="PCO",`PCO_CC`="PCO_CC",`CAP`="CAP",`CAP_CC`="CAP_CC"),
+                                 Source=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep"))) +
+    scale_colour_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+    scale_fill_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+    labs(x="Predicted Source", colour="Absent levels used in prediction", bg="Absent levels used in prediction", 
+         linetype="Absent levels used in prediction")
+p1
+
+p2 <- p |>
+  filter(method %in% c("CA0", "PCO", "CAP")) |> 
+  mutate(method = factor(method, levels=c("CA0","PCO","CAP"))) |> 
+  mutate(pch=ifelse(Source==prediction,21,1)) |> 
+  ggplot(aes(x=prediction, y=prop, group=uses_unique)) +
+  geom_point(aes(colour=uses_unique, shape=I(pch), bg=uses_unique), size=3) +
+  geom_line(aes(colour=uses_unique, lty=uses_unique)) +
+  theme_bw(base_size = 14) + 
+  scale_y_continuous("Proportion of predictions",expand=c(0.03,0.03),limits=c(0,1)) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "top") +
+  facet_grid(Source~method, 
+             labeller=labeller(method=c(`CA0`="CA-unbiased",`PCO`="PCO",`CAP`="CAP"),
+                               Source=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep"))) +
+  scale_colour_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  scale_fill_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  labs(x="Predicted Source", colour="Absent levels used in prediction", bg="Absent levels used in prediction", 
+       linetype="Absent levels used in prediction")
+p2
+
+p3 <- p |>
+  filter(method %in% c("CA0_CC", "PCO_CC", "CAP_CC")) |> 
+  mutate(method = factor(method, levels=c("CA0_CC","PCO_CC","CAP_CC"))) |> 
+  mutate(pch=ifelse(Source==prediction,21,1)) |> 
+  ggplot(aes(x=prediction, y=prop, group=uses_unique)) +
+  geom_point(aes(colour=uses_unique, shape=I(pch), bg=uses_unique), size=3) +
+  geom_line(aes(colour=uses_unique, lty=uses_unique)) +
+  theme_bw(base_size = 14) + 
+  scale_y_continuous("Proportion of predictions",expand=c(0.03,0.03),limits=c(0,1)) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "top") +
+  facet_grid(Source~method, 
+             labeller=labeller(method=c(`CA0_CC`="CA_unbiased_CC",`PCO_CC`="PCO_CC",`CAP_CC`="CAP_CC"),
+                               Source=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep"))) +
+  scale_colour_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  scale_fill_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  labs(x="Predicted Source", colour="Absent levels used in prediction", bg="Absent levels used in prediction", 
+       linetype="Absent levels used in prediction")
+p3
+
+p4 <- p |>
+  mutate(residualised = factor(case_when(grepl("CC",method)~"Yes", TRUE~"No"))) |> 
+  mutate(method = factor(case_when(
+    grepl("CA0",method)~"CA0",
+    grepl("PCO",method)~"PCO",
+    grepl("CAP",method)~"CAP"))) |>
+  mutate(method = factor(method, levels=c("CA0","PCO","CAP"))) |> 
+  mutate(pch=ifelse(Source==prediction,21,1))
+p4 |> 
+  ggplot(aes(x=prediction, y=prop)) +
+  geom_point(aes(colour=method, shape=I(pch), bg=method), size=3) +
+  facet_grid(Source~residualised, 
+             labeller=labeller(residualised=c(`Yes`="Residualised on CC",`No`="Not residualised"),
+                               Source=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep")))
+  
+  geom_line(aes(colour=method, lty=uses_unique)) +
+  theme_bw(base_size = 14) + 
+  scale_y_continuous("Proportion of predictions",expand=c(0.03,0.03),limits=c(0,1)) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "top") +
+  facet_grid(Source~residualised, 
+             labeller=labeller(residualised=c(`Yes`="Residualised on CC",`No`="Not residualised"),
+                               Source=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep"))) +
+  scale_colour_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  scale_fill_manual(values=c("#d34728","#193d87"),labels = c("No", "Yes")) + 
+  labs(x="Predicted Source", colour="Absent levels used in prediction", bg="Absent levels used in prediction", 
+       linetype="Absent levels used in prediction")
+p4
+
+p5 <- p  |>
+  mutate(residualised = factor(case_when(grepl("CC",method)~"Yes", TRUE~"No"))) |> 
+  mutate(method = factor(case_when(
+    grepl("CA0",method)~"CA0",
+    grepl("PCO",method)~"PCO",
+    grepl("CAP",method)~"CAP")))|>
+  mutate(Col = case_when(
+    method == "CA0" ~ "Dodger blue3",
+    method == "PCO" ~ "Orange",
+    method == "CAP" ~ "Green4",
+    TRUE ~ "Black")) |> 
+  filter(Source==prediction) |>
+  ggplot(aes(x=uses_unique, y=prop)) + 
+  geom_point(aes(colour=method, shape=factor(residualised)),size=3.2, alpha=0.5) + 
+  scale_colour_manual(breaks = p2$method, 
+                      values = p2$Col) +
+  scale_shape_manual(values = c(19,21)) +
+  facet_wrap(~Source, nrow = 3) + 
+  labs(title = "Accuracy of tree predictions", 
+       x="\nUnique alleles used in tree", y="Proportion\n")
+p5
+
+pdf(file = "../CAP_Data/results/Results_plots.pdf")
+list(p1,p2)
+dev.off()
+
+
 
 # 3. Side by side plots comparing prediction accuracy of different values of mp
 mp_plots(MC_all_trees)
-  
+
+mp_plots <- function(dat){map_dfr(dat, function(x) {
+  mp <- x |> map("mp") |> unlist() |> unique()
+  answer_all <- x |> map("answer")  |> bind_rows(.id = "Fold") 
+  p <- answer_all |> 
+    mutate(mp = rep(mp, times = nrow(answer_all))) |>
+    mutate(uses_unique = if_else(uses_unique == 0, "No", "Yes")) |>
+    mutate(across(Source, factor, levels = c("Poultry","Sheep", "Beef"))) |>
+    mutate(across(prediction, factor, levels = c("Poultry","Sheep", "Beef"))) |>
+    group_by(uses_unique,Source, prediction,mp) |>
+    summarise(n=n()) |>
+    group_by(uses_unique,Source) |>
+    mutate(N = sum(n)) |>
+    mutate(prop = n/N)}) |> ggplot() + 
+    geom_col(aes(y=prop, x=Source, fill=prediction)) + 
+    labs(title = paste0("CAP prediction results for different mp values"),
+         y="Proportion of tree predictions\n", x="\nSource", fill="Prediction") + 
+    theme(text = element_text(size=11)) + 
+    facet_grid(uses_unique ~ mp, labeller=label_both)
+}
+
+
+
+
+
+
 # 4. Overall misclassification (split by source) # run 3/11/2022
 # load results from cross_validation.R
 load("../CAP_Data/results/all_MC_results.Rdata")  # from cross_validation.R
@@ -161,6 +311,7 @@ p7 <- plot_dat |>
        colour = "Residualised", bg="Residualised") +
   theme(plot.subtitle = element_text(hjust=0.5)) +
   theme_bw()
+list(p1,p2,p3,p4,p5,p6,p7)
 
 ########################
 pdf(file = "../CAP_Data/results/MC_plots.pdf")
