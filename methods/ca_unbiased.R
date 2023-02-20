@@ -29,15 +29,15 @@ factor_to_ca0_score <- function(var, class, axes) {
 # iterate over the variable columns and grab the output as a new data.frame to send into ca, and store the absent level stuff for later
 prepare_training_ca0 <- function(data, vars, class, axes=2, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,{{vars}})
-  classes   <- data |> pull({{class}})
+  var_cols <- data |> select(all_of(vars))
+  classes   <- data |> pull(class)
   # iterate over the var columns, and convert
   prepped <- map(var_cols, factor_to_ca0_score, class = classes, axes) |> compact()
   output <- map(prepped, "output")
-  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select({{class}}) |> colnames()), 
+  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
   if(!is.null(residualised)) {
-    prepped_data <- prepped_data |> bind_cols(data |> select({{residualised}}))
+    prepped_data <- prepped_data |> bind_cols(data |> select(all_of(residualised)))
   }
   extra <- map(prepped, "extra")
   list(training = prepped_data,
@@ -58,13 +58,13 @@ impute_score_ca0 <- function(var, extra) {
 # iterate over the variable columns and use the extra info from before to remap the levels in the test data. 
 prepare_test_ca0 <- function(data, extra, id, residualised=NULL) {
   # first remap the variable levels to the appropriate ordinal level
-  id <- data |> select({{id}})
+  id <- data |> select(all_of(id))
   var_cols <- data |> select(any_of(names(extra)))
   newdata_score <- map2(var_cols, extra, impute_score_ca0)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(id, data |> select({{residualised}}), newdata_pred)
+    bind_cols(id, data |> select(all_of(residualised)), newdata_pred)
   } else {
     bind_cols(id, newdata_pred)
   }

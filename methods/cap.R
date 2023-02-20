@@ -43,15 +43,15 @@ factor_to_CAP_score <- function(var, dist, class, k, m, mp, axes) {
 
 prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,{{vars}})
-  classes   <- data |> pull({{class}})
+  var_cols <- dplyr::select(data,all_of(vars))
+  classes   <- data |> pull(class)
   # iterate over the var columns and distance matrices, and convert
   prepped <- map2(var_cols, d, factor_to_CAP_score, class = classes, k, m, mp, axes) |> compact() # removes empties
   output <- map(prepped,"output")
-  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select({{class}}) |> colnames()), 
+  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
   if(!is.null(residualised)) {
-    prepped_data <- prepped_data |> bind_cols(data |> select({{residualised}}))
+    prepped_data <- prepped_data |> bind_cols(data |> select(all_of(residualised)))
   }
   extra <- map(prepped, "extra")
   list(training = prepped_data,
@@ -90,13 +90,13 @@ impute_score_cap <- function(var, extra) {
 }
 
 prepare_test_cap <- function(data, extra, id, residualised=NULL) {
-  id <- data |> select({{id}})
+  id <- data |> select(all_of(id))
   var_cols <- data |> select(any_of(names(extra)))
   newdata_score <- map2(var_cols, extra, impute_score_cap)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(id, data |> select({{residualised}}), newdata_pred)
+    bind_cols(id, data |> select(all_of(residualised)), newdata_pred)
   } else {
       bind_cols(id, newdata_pred)
   }

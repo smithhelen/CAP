@@ -55,14 +55,14 @@ Dat.test.CC <- map(flds.CC, ~slice(dat_CC, .))    # list of k test data sets
 
 ## Pull out individual tree predictions
 # 1. original data, mp=95
-cgMLST_CA0 <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, method="ca0", axes=2, class="Source", id="LabID"))
-cgMLST_PCO <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=d_95, method="pco", axes=2, class="Source", id="LabID"))
-cgMLST_CAP <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=d_95, method="cap", k=2, mp=95, axes=1, class="Source", id="LabID"))
+cgMLST_CA0 <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, method="ca0", axes=2, class="Source", id="LabID", var_id="CAMP"))
+cgMLST_PCO <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=d_95, method="pco", axes=2, class="Source", id="LabID", var_id="CAMP"))
+cgMLST_CAP <- map2(Dat.train, Dat.test, ~tree_fn(.x,.y, d=d_95, method="cap", k=2, mp=95, axes=1, class="Source", id="LabID", var_id="CAMP"))
 
 # 2. CC residualised data, mp=95
-cgMLST_CA0_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, method="ca0", axes=2, class="Source", id="LabID", residualised="CC"))
-cgMLST_PCO_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method="pco", class="Source", id="LabID", axes=2, residualised="CC"))
-cgMLST_CAP_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method="cap", class="Source", id="LabID", k=2, mp=95, axes=2, residualised="CC"))
+cgMLST_CA0_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, method="ca0", axes=2, class="Source", id="LabID", residualised="CC", var_id="CAMP"))
+cgMLST_PCO_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method="pco", class="Source", id="LabID", axes=2, residualised="CC", var_id="CAMP"))
+cgMLST_CAP_CC <- map2(Dat.train.CC, Dat.test.CC, ~tree_fn(.x,.y, d=d_CC, method="cap", class="Source", id="LabID", k=2, mp=95, axes=2, residualised="CC", var_id="CAMP"))
 
 
 # Merge data sets

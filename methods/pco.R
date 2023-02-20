@@ -36,15 +36,15 @@ factor_to_pco_score <- function(var, dist, axes) {
 
 prepare_training_pco <- function(data, vars, class, d, axes=2, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,{{vars}})
-  classes   <- data |> pull({{class}})
+  var_cols <- dplyr::select(data,all_of(vars))
+  classes   <- data |> pull(class)
   # iterate over the var columns and distance matrices, and convert
   prepped <- map2(var_cols, d, factor_to_pco_score, axes) |> compact() # removes empties
   output <- map(prepped,"output")
-  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select({{class}}) |> colnames()),
+  prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()),
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
   if(!is.null(residualised)) {
-    prepped_data <- prepped_data |> bind_cols(data |> select({{residualised}}))
+    prepped_data <- prepped_data |> bind_cols(data |> select(all_of(residualised)))
   }
   extra <- map(prepped, "extra")
   list(training = prepped_data,
@@ -83,9 +83,9 @@ prepare_test_pco <- function(data, extra, id, residualised=NULL) {
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(data |> select({{id}},{{residualised}}), newdata_pred)
+    bind_cols(data |> select(all_of(id),all_of(residualised)), newdata_pred)
   } else {
-    bind_cols(data |> select({{id}}), newdata_pred)
+    bind_cols(data |> select(all_of(id)), newdata_pred)
   }
   newdata_pred
 }

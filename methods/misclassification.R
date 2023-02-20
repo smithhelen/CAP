@@ -5,12 +5,12 @@
 
 # functions
 # (1) - calculate proportion correct predictions for trees with and without unique alleles
-misclass_tree_fn <- function(dat){
+misclass_tree_fn <- function(dat, source="Source"){
   df <- dat |> 
     mutate(uses_unique = if_else(uses_unique == 0, "No", "Yes")) |>
-    group_by(method,uses_unique,Source, prediction) |>
+    group_by(method,uses_unique, source, prediction) |>
     summarise(n=n()) |>
-    group_by(method,uses_unique,Source) |>
+    group_by(method,uses_unique,source) |>
     mutate(N = sum(n)) |>
     mutate(prop = n/N)
   df

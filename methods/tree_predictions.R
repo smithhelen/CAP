@@ -38,7 +38,7 @@ predict_row <- function(tree, data_row, uniques_row, residualised) {
     }
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
-    # cat(split)   # for checking errors
+    #cat(split)   # for checking errors
     if(!is.null(residualised) && split == residualised){
       # NOTE: This code assumes residualised is a factor. It doesn't have to be, but
       #       if it's not then this will break. We could probably fix this by appending another
@@ -85,7 +85,7 @@ my_treeInfo <- function(mod, tree_number) {
   tree
 }
 
-predict_tree <- function(mod, tree_number, nd, nu, id, residualised) {
+predict_tree <- function(mod, tree_number, nd, nu, id, residualised=NULL) {
   #cat("working on tree", tree_number, "\n")
   tree <- my_treeInfo(mod, tree_number)
   out_dfr <- map2_dfr(nd, nu, ~predict_row(tree, .x, .y, residualised=residualised))
@@ -95,7 +95,7 @@ predict_tree <- function(mod, tree_number, nd, nu, id, residualised) {
 }
 
 # do the predictions
-predict_by_tree <- function(mod, new_data, new_unique, id, residualised) {
+predict_by_tree <- function(mod, new_data, new_unique, id, residualised=NULL) {
   x <- new_data
   if (!is.null(residualised)) {
     # need to replace our (factor) variable residualised with the corresponding
@@ -131,33 +131,32 @@ predict_by_tree <- function(mod, new_data, new_unique, id, residualised) {
 }
 
 # pull out individual tree decisions for each observation
-tree_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, method=ca0, ntrees=500, residualised=NULL, id="LabID", class="Source"){
+tree_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, method=ca0, ntrees=500, residualised=NULL, id="LabID", class="Source", var_id="CAMP"){
   switch(method, 
          ca0 = {
-           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), class="Source", axes=axes, residualised=residualised)
-           test <- prepare_test_ca0(Dat.test, train$extra, id={{id}}, residualised=residualised)
+           train <- prepare_training_ca0(Dat.train, starts_with(var_id), class=class, axes=axes, residualised=residualised)
+           test <- prepare_test_ca0(Dat.test, train$extra, id=id, residualised=residualised)
          },
          pco = {
-           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, residualised=residualised)
-           test <- prepare_test_pco(Dat.test, train$extra, id={{id}}, residualised=residualised)
+           train <- prepare_training_pco(Dat.train, starts_with(var_id), class=class, d, axes=axes, residualised=residualised)
+           test <- prepare_test_pco(Dat.test, train$extra, id=id, residualised=residualised)
          },
          cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
-           test <- prepare_test_cap(Dat.test, train$extra, id={{id}}, residualised=residualised)
+           train <- prepare_training_cap(Dat.train, starts_with(var_id), class=class, d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
+           test <- prepare_test_cap(Dat.test, train$extra, id=id, residualised=residualised)
          }
   )       
   uniques <- is_unique(Dat.test, train$extra)
-  set.seed(3)
-  classes <- train$training |> pull({{class}})
+  classes <- train$training |> pull(class)
   rf_mod <- if(is.null(residualised)){
-    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
+    ranger(classes ~ ., data=train$training |> select(-any_of(class)), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
   } else {
-    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
+    ranger(classes ~ ., data=train$training |> select(-any_of(class)), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
            always.split.variables = residualised)
   }
   #list(rf_mod=rf_mod, test=test, uniques=uniques, id=id) # for troubleshooting
   tree_preds <- predict_by_tree(rf_mod, test, uniques, id=id, residualised=residualised)
-  answer <- tree_preds  |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))
+  answer <- tree_preds  |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, any_of(class)))
   answer
 }
 
