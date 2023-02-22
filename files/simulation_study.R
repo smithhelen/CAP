@@ -37,7 +37,7 @@ gen_data <- function(beta){
   # need to do this even for the unobserved alleles so we can assign a source to the individuals later
   # this is balanced - there are 10 of each allele
   # counts of source one (s1)
-  count_s1 <- map(probs, ~rbinom(n=1, size=10, p=.)) |> unlist()
+  count_s1 <- map(probs, ~rbinom(n=1, size=10, p=.)) |> unlist() # find 1 random value, from a sample of 10, with probability=p
   # counts of source two (s2)
   count_s2 <- 10 - count_s1
   
@@ -58,7 +58,7 @@ gen_data <- function(beta){
   df <- data.frame(allele = factor(1:15), PCO1, PCO2, p=probs, count_s1, count_s2, observed = c(rep("Y",times=10), rep("N",times=5))) 
   dat <- df |> select(allele, PCO1, PCO2, starts_with("count"), observed) |>  
     pivot_longer(cols = starts_with("count"), names_to = "source", values_to = "n", names_prefix = "count_") |> 
-    uncount(n)|> mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id")
+    uncount(n) |> mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id")
   
   out <- list(dat=dat, Q=Q, PCO=PCO, df=df, d=d)
   out
@@ -79,7 +79,7 @@ encode <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=NULL, m=2, k=2, ntree
 }
 
 ## run ranger
-run_ranger <- function(dat, ntrees=5, d=d, k=2, m=2, axes=1, class="source", id="id", var_id="allele"){
+run_ranger <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", id="id", var_id="allele"){
   # prepare data - add id and split into training and test sets
   # the training data is a sample all of the individuals which have 'observed' alleles
   # the testing data has a mix of observed and unobserved alleles
