@@ -1,4 +1,4 @@
-### d to PCO to d ###
+### d to PCO to d ### - solved. The simulated PCO scores are not true PCO scores, they get rotated a bit by the eigenanalysis
 
 # load libraries and functions
 source("methods/libs_fns.R")
