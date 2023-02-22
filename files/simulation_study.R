@@ -41,18 +41,8 @@ gen_data <- function(beta){
   # counts of source two (s2)
   count_s2 <- 10 - count_s1
   
-  PCO <- data.frame(PCO1, PCO2)
-  
   # calculate distances
-  d <- PCO |> dist(diag = TRUE) |> as.matrix()
-  
-  # re-calculate PCO scores from d for comparison
-  A <- -0.5 * d^2
-  B <- dbl_center(A)
-  eigen_B <- eigen_decomp(B, symmetric=TRUE)
-  lambdas_B <- eigen_B$values[1:2]
-  Qo <- eigen_B$vectors
-  Q <- sweep(Qo[, 1:2, drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
+  d <- data.frame(PCO1, PCO2) |> dist(diag = TRUE) |> as.matrix()
   
   # fill out individual row data ie what the original data would actually look like
   df <- data.frame(allele = factor(1:15), PCO1, PCO2, p=probs, count_s1, count_s2, observed = c(rep("Y",times=10), rep("N",times=5))) 
@@ -60,7 +50,7 @@ gen_data <- function(beta){
     pivot_longer(cols = starts_with("count"), names_to = "source", values_to = "n", names_prefix = "count_") |> 
     uncount(n) |> mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id")
   
-  out <- list(dat=dat, Q=Q, PCO=PCO, df=df, d=d)
+  out <- list(dat=dat, d=d)
   out
 }
 
@@ -100,17 +90,13 @@ run_ranger <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", i
   training <- dat.scores |> map(c("train", "training")) |> map(function(x) x |> select(-all_of(class)))
   classes <- dat.train |> pull(class)
   rf_mods <- map(training, ~ranger(classes ~ ., data=.x, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE))
-  rf_mods_pco <- ranger(classes ~ ., data=dat.train |> select(PCO1), oob.error = FALSE, num.trees=ntrees, respect.unordered.factors = TRUE) # ranger with scores (not dist) for PCO method
-  
+
   # individual tree predictions
   testing <- dat.scores |> map("test")
   tree_preds <- map2(rf_mods, testing, ~predict_by_tree(.x, .y, uniques, id=id))
-  tree_preds_pco <- predict_by_tree(rf_mods_pco, dat.test |> select(all_of(id), PCO1), uniques |> rename(PCO1=allele.V1), id=id)
   answer <- tree_preds |> map(function(x) x |> left_join(dat.test |> select(all_of(id), all_of(class))))
-  answer_pco <- tree_preds_pco  |> left_join(dat.test |> select(all_of(id), all_of(class)))
-  #(sim_PCO$prediction == sim_PCOb$prediction) |> table() #not exactly the same
-  
-  list(tree_preds = answer, tree_preds_pco = answer_pco, dat.scores=dat.scores)
+
+  list(tree_preds = answer, dat.scores=dat.scores)
   }
 
 mc_trees <- function(dat, class){
@@ -137,23 +123,18 @@ sim_fn <- function(beta, ntrees){
    preds <- run_ranger(dat = dat$dat, ntrees, d=d, k=2, m=2, axes=1, class="source", id="id", var_id="allele")
    
    #misclassification
-   mcdat <- c(preds$tree_preds, pco2=list(preds$tree_preds_pco)) |> bind_rows(.id = "method")
+   mcdat <- preds$tree_preds |> bind_rows(.id = "method")
    mc <- mc_trees(mcdat, class="source")
    
    # store misclassification rates for observed alleles and unobserved alleles
    # output results
-   out <- list(mc=mc, mc.extras=list(dat=dat, tree_preds=c(preds$tree_preds, pco2=list(preds$tree_preds_pco)), dat.scores=preds$dat.scores))
+   out <- list(mc=mc, mc.extras=list(dat=dat, tree_preds=preds$tree_preds, dat.scores=preds$dat.scores))
    out
 }
 
 
 
-### now increase number of genes
-# what about interaction between genes
-# and direction of PCO relationship
-# do we need to change how we uncount(n) so it's not the same alleles in the same blocks
-
-
-
+# now can change balance of alleles
+# increase number of sources
 
 
