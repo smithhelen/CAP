@@ -53,7 +53,7 @@ gen_data_2genes <- function(beta){
     mutate(observed = ifelse(observed1=="Y"&observed2=="Y","Y","N")) |> select(gene1, gene2, source, observed)|> 
     mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id")
   
-  simdat <- list(df=dat, d=list(d1=d1,d2=d2))
+  simdat <- list(df=dat, d=list(gene1=d1,gene2=d2))
   simdat
 }
 
@@ -65,13 +65,13 @@ split_dat <- function(dat){
 }
 
 ## encode factors
-encode <- function(dat.train, dat.test, d=NULL, axes=2, mp=NULL, m=2, k=2, id=id, class, var_id){
-  train.ca0 <- prepare_training_ca0(dat.train, starts_with(var_id), class=class, axes=axes)
-  test.ca0 <- prepare_test_ca0(dat.test, train.ca0$extra, id=id)
-  train.pco <- prepare_training_pco(dat.train, starts_with(var_id), class=class, d, axes=axes)
-  test.pco <- prepare_test_pco(dat.test, train.pco$extra, id=id)
-  train.cap <- prepare_training_cap(dat.train, starts_with(var_id), class=class, d, axes=axes, k=k, m=m, mp=mp)
-  test.cap <- prepare_test_cap(dat.test, train.cap$extra, id=id)
+encode <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=NULL, m=2, k=2, ntrees=500, id=id, class, var_id){
+  train.ca0 <- prepare_training_ca0(Dat.train, starts_with(var_id), class=class, axes=axes)
+  test.ca0 <- prepare_test_ca0(Dat.test, train.ca0$extra, id=id)
+  train.pco <- prepare_training_pco(Dat.train, starts_with(var_id), class=class, d, axes=axes)
+  test.pco <- prepare_test_pco(Dat.test, train.pco$extra, id=id)
+  train.cap <- prepare_training_cap(Dat.train, starts_with(var_id), class=class, d, axes=axes, k=k, m=m, mp=mp)
+  test.cap <- prepare_test_cap(Dat.test, train.cap$extra, id=id)
   out <- list(ca0 = list(train=train.ca0, test=test.ca0),
               pco = list(train=train.pco, test=test.pco),
               cap = list(train=train.cap, test=test.cap))
@@ -79,7 +79,7 @@ encode <- function(dat.train, dat.test, d=NULL, axes=2, mp=NULL, m=2, k=2, id=id
 }
 
 ## run ranger
-run_ranger <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", id="id", var_id="gene"){
+run_ranger_2genes <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", id="id", var_id="gene"){
   # prepare data - add id and split into training and test sets
   # the training data is a sample all of the individuals which have 'observed' alleles
   # the testing data has a mix of observed and unobserved alleles
@@ -92,9 +92,7 @@ run_ranger <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", i
   
   # encode factors
   dat.scores <- encode(dat.train, dat.test, d=d, k=2, m=2, axes=1, class=class, id=id, var_id=var_id, ntrees=ntrees)
-  genes <- colnames(dat |> select(starts_with("gene")))
-  names(dat.scores) <- genes
-  
+
   # find uniques
   extras <- dat.scores |> map(c("train","extra"))
   uniques <- extras |> pluck(1) |> is_unique(data=dat.test)
@@ -103,54 +101,13 @@ run_ranger <- function(dat, ntrees=500, d=d, k=2, m=2, axes=1, class="source", i
   training <- dat.scores |> map(c("train", "training")) |> map(function(x) x |> select(-all_of(class)))
   classes <- dat.train |> pull(class)
   rf_mods <- map(training, ~ranger(classes ~ ., data=.x, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE))
-  rf_mods_pco <- ranger(classes ~ ., data=dat.train |> select(PCO1), oob.error = FALSE, num.trees=ntrees, respect.unordered.factors = TRUE) # ranger with scores (not dist) for PCO method
-  
+
   # individual tree predictions
   testing <- dat.scores |> map("test")
   tree_preds <- map2(rf_mods, testing, ~predict_by_tree(.x, .y, uniques, id=id))
-  tree_preds_pco <- predict_by_tree(rf_mods_pco, dat.test |> select(all_of(id), PCO1), uniques |> rename(PCO1=allele.V1), id=id)
   answer <- tree_preds |> map(function(x) x |> left_join(dat.test |> select(all_of(id), all_of(class))))
-  answer_pco <- tree_preds_pco  |> left_join(dat.test |> select(all_of(id), all_of(class)))
-  #(sim_PCO$prediction == sim_PCOb$prediction) |> table() #not exactly the same
-  
-  list(tree_preds = answer, tree_preds_pco = answer_pco, dat.scores=dat.scores)
-}
 
-## prepare data
-prepare_dat <- function(dat, d=d, k=2, m=2, axes=1, class="source", id="id"){
-
-  # identify genes
-  
-  # encode factors of each gene (will be a list)
-  dat.scores <- encode(dat.train, dat.test, d=list(y), k=2, m=2, axes=1, class=class, id=id, var_id=starts_with("gene")))
-  names(dat.scores) <- genes
-  dat.scores
-}
-
-## run ranger
-run_ranger <- function(dat.scores, ntrees=500, class="source", id="id"){
-  # set number of trees
-  ntrees = ntrees
-  
-  # find uniques
-  extras <- dat.scores |> map(c("train","extra"))
-  uniques <- extras |> pluck(1) |> is_unique(data=dat.test)
-  
-  # train model
-  training <- dat.scores |> map(c("train", "training")) |> map(function(x) x |> select(-all_of(class)))
-  classes <- dat.train |> pull(class)
-  rf_mods <- map(training, ~ranger(classes ~ ., data=.x, oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE))
-  rf_mods_pco <- ranger(classes ~ ., data=dat.train |> select(PCO1), oob.error = FALSE, num.trees=ntrees, respect.unordered.factors = TRUE) # ranger with scores (not dist) for PCO method
-  
-  # individual tree predictions
-  testing <- dat.scores |> map("test")
-  tree_preds <- map2(rf_mods, testing, ~predict_by_tree(.x, .y, uniques, id=id))
-  tree_preds_pco <- predict_by_tree(rf_mods_pco, dat.test |> select(all_of(id), PCO1), uniques |> rename(PCO1=allele.V1), id=id)
-  answer <- tree_preds |> map(function(x) x |> left_join(dat.test |> select(all_of(id), all_of(class))))
-  answer_pco <- tree_preds_pco  |> left_join(dat.test |> select(all_of(id), all_of(class)))
-  #(sim_PCO$prediction == sim_PCOb$prediction) |> table() #not exactly the same
-  
-  list(tree_preds = answer, tree_preds_pco = answer_pco, dat.scores=dat.scores)
+  list(tree_preds = answer, dat.scores=dat.scores)
 }
 
 mc_trees <- function(dat, class){
@@ -168,20 +125,22 @@ mc_trees <- function(dat, class){
 }
 
 # put it into a function
-sim_fn <- function(beta, ntrees){
+sim_fn_2genes <- function(beta, ntrees){
   # generate data
   simdat <- gen_data_2genes(beta)
+  dat = simdat$df
+  d=simdat$d
   
   # run ranger predictions
-  preds <- run_ranger(dat = simdat$df, ntrees, d=simdat$d, k=2, m=2, axes=1, class="source", id="id", var_id="allele")
+  preds <- run_ranger_2genes(dat, ntrees, d, k=2, m=2, axes=1, class="source", id="id", var_id="gene")
   
   #misclassification
-  mcdat <- c(preds$tree_preds, pco2=list(preds$tree_preds_pco)) |> bind_rows(.id = "method")
+  mcdat <- preds$tree_preds |> bind_rows(.id = "method")
   mc <- mc_trees(mcdat, class="source")
   
   # store misclassification rates for observed alleles and unobserved alleles
   # output results
-  out <- list(mc=mc, mc.extras=list(dat=dat, tree_preds=c(preds$tree_preds, pco2=list(preds$tree_preds_pco)), dat.scores=preds$dat.scores))
+  out <- list(mc=mc, mc.extras=list(dat=dat, tree_preds=preds$tree_preds, dat.scores=preds$dat.scores))
   out
 }
 
