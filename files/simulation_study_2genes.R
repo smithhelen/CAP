@@ -37,23 +37,34 @@ gen_data_2genes <- function(beta){
                    PCO1 = c(Q1$PCO1, Q2$PCO1), 
                    PCO2 = c(Q1$PCO2, Q2$PCO2), 
                    s1 = c(X1$n1,X2$n1), 
-                   s2 = c(X1$n2,X2$n2),
-                   observed = "N")
-  ob <- c(sample(10,7),sample(7,4)+10)
-  df[ob,"observed"] <- "Y"
+                   s2 = c(X1$n2,X2$n2))
   
-  dat <- df |> pivot_longer(cols = starts_with("s"), names_to = "source", values_to = "n", names_prefix = "count_") |> 
+  # determine if the allele was observed in the training data
+  # use multinomial for the combination of both present, gene1 present, gene2 present, or neither present
+  # and binomial for alleles 8-10 in gene1
+  obs <- (rmultinom(7, size = 1, prob = c(0.3,0.2,0.2,0.3)) * c(1,2,3,4)) |> colSums() |> 
+    c(rbinom(3, size = 1, prob = c(0.6,0.4))* 5)
+  obs <- obs |> as.data.frame() |> mutate(obs.1 = case_when(obs %in% c(1,2,5) ~ "Y", .default = "N"), 
+                                          obs.2 = case_when(obs %in% c(1,3) ~ "Y", .default = "N"))
+  df <- df |> mutate(observed = c(obs$obs.1, obs$obs.2[1:7]))
+  
+  dat <- df |> pivot_longer(cols = starts_with("s"), names_to = "source", values_to = "n") |> 
     uncount(n)|> mutate(across(!where(is.double), as.factor))
+  
+  # make it so that each individual comes from the same source (ie one indidivual has two genes and their sources need to match)
   dat[dat$gene==2,"source"] <- dat[dat$gene==1,"source"]
   # check all combinations are in data
-  #table(dat[dat$gene==1,]$observed, dat[dat$gene==2,]$observed
+  #table(dat[dat$gene==1,]$observed, dat[dat$gene==2,]$observed)
   
-  dat <- dat |> filter(gene == 1) |> select(allele, observed) |> rename(gene1 = allele, observed1 = observed) |> 
+  dat2 <- dat |> filter(gene == 1) |> select(allele, observed) |> rename(gene1 = allele, observed1 = observed) |> 
     bind_cols(dat |> filter(gene == 2) |> select(allele, observed, source) |> rename(gene2 = allele, observed2 = observed)) |> 
-    mutate(observed = ifelse(observed1=="Y"&observed2=="Y","Y","N")) |> select(gene1, gene2, source, observed)|> 
-    mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id")
+    mutate(observed = ifelse(observed1=="Y"&observed2=="Y","Y","N")) |> select(gene1, gene2, source, observed) |> 
+    mutate(across(!where(is.double), as.factor)) |> rownames_to_column("id") |> droplevels()
   
-  simdat <- list(df=dat, d=list(gene1=d1,gene2=d2))
+  # check for correlation between genes
+  #dat2 |> filter(source=="s1") |> select(starts_with("gene")) |> table() |> chisq.test(simulate.p.value = TRUE)
+
+  simdat <- list(df=dat2, d=list(gene1=d1,gene2=d2))
   simdat
 }
 
