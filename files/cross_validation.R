@@ -20,6 +20,9 @@ details <- read.csv("../CAP_data/data/SACNZ_referencelist.csv") |> select(LabID,
 # distance information (Hamming)
 load("../CAP_Data/data/list_of_distance_matrices.RData") #  distance matrices of hamming distances among unique alleles for each gene
 
+# distance information (Phandango)
+load("Phandango/Phandango_data/list_of_distance_matrices_Phandango.RData") # hamming distances scaled to account for recombination
+
 # residualised distance information
 load("../CAP_Data/data/species_distance_matrices.Rdata") #  residualised based on species
 load("../CAP_Data/data/CC_distance_matrices.Rdata")  # residualised based on CC
@@ -42,20 +45,22 @@ Dat_aa <- aa_allele_dat |>
   mutate(Source = fct_recode(as.factor(Source), Cattle="Beef", Chicken="Poultry")) |> 
   filter(Source != "Human") |> droplevels()
 
+
 # Select dataset to run cross-validation on
 dat <- Dat_jc # original jejuni coli data
-dat <- Dat_jc |> filter(!is.na(Species)) |> droplevels() # for residualised matrices based on species
-dat <- Dat_jc |> filter(!is.na(CC)) |> droplevels() |> arrange("LabID") # for residualised matrices based on clonal complex
-dat <- Dat_jc |> filter(Species=="Jejuni") |> droplevels() # jejuni only data
-dat <- Dat_aa
-dat <- Dat_aa|> filter(!is.na(CC)) |> droplevels() |> arrange("LabID") # for aa residualised data
+dat_sp <- Dat_jc |> filter(!is.na(Species)) |> droplevels() # for residualised matrices based on species
+dat_CC <- Dat_jc |> filter(!is.na(CC)) |> droplevels() |> arrange("LabID") # for residualised matrices based on clonal complex
+dat_j <- Dat_jc |> filter(Species=="Jejuni") |> droplevels() # jejuni only data
+dat_aa <- Dat_aa
+dat_aa_CC <- Dat_aa|> filter(!is.na(CC)) |> droplevels() |> arrange("LabID") # for aa residualised data
 
 # Select distance matrices to match choice of data
 list_of_distance_matrices <- map(list_of_distance_matrices, as.matrix) # original
-list_of_distance_matrices <- map(species_distance_matrices, as.matrix) # for residualised matrices based on species
-list_of_distance_matrices <- map(CC_distance_matrices, as.matrix) # for residualised matrices based on clonal complex
-list_of_distance_matrices <- map(aa_distance_matrices, as.matrix) # amino acid data
-list_of_distance_matrices <- map(CC_distance_matrices_aa, as.matrix) # for amino acid residualised matrices based on clonal complex
+list_of_distance_matrices_sp <- map(species_distance_matrices, as.matrix) # for residualised matrices based on species
+list_of_distance_matrices_CC <- map(CC_distance_matrices, as.matrix) # for residualised matrices based on clonal complex
+list_of_distance_matrices_aa <- map(aa_distance_matrices, as.matrix) # amino acid data
+list_of_distance_matrices_aa_CC <- map(CC_distance_matrices_aa, as.matrix) # for amino acid residualised matrices based on clonal complex
+list_of_distance_matrices_Phandango <- map(list_of_distance_matrices_Phandango, as.matrix) # Phandango (recombination)
 
 
 ## Create data splits - repeat for each different set of data being run ##
@@ -64,44 +69,83 @@ flds <- createFolds(y=dat$Source, k=10)
 Dat.train <- map(flds, ~slice(dat, {-.}))  # list of k training data sets
 Dat.test <- map(flds, ~slice(dat, .))    # list of k test data sets
 
+set.seed(3)
+flds_sp <- createFolds(y=dat_sp$Source, k=10) 
+Dat.train_sp <- map(flds_sp, ~slice(dat_sp, {-.}))  # list of k training data sets
+Dat.test_sp <- map(flds_sp, ~slice(dat_sp, .))    # list of k test data sets
+
+set.seed(3)
+flds_CC <- createFolds(y=dat_CC$Source, k=10) 
+Dat.train_CC <- map(flds_CC, ~slice(dat_CC, {-.}))  # list of k training data sets
+Dat.test_CC <- map(flds_CC, ~slice(dat_CC, .))    # list of k test data sets
+
+set.seed(3)
+flds_j <- createFolds(y=dat_j$Source, k=10) 
+Dat.train_j <- map(flds_j, ~slice(dat_j, {-.}))  # list of k training data sets
+Dat.test_j <- map(flds_j, ~slice(dat_j, .))    # list of k test data sets
+
+set.seed(3)
+flds_aa <- createFolds(y=dat_aa$Source, k=10) 
+Dat.train_aa <- map(flds_aa, ~slice(dat_aa, {-.}))  # list of k training data sets
+Dat.test_aa <- map(flds_aa, ~slice(dat_aa, .))    # list of k test data sets
+
+set.seed(3)
+flds_aa_CC <- createFolds(y=dat_aa_CC$Source, k=10) 
+Dat.train_aa_CC <- map(flds_aa_CC, ~slice(dat_aa_CC, {-.}))  # list of k training data sets
+Dat.test_aa_CC <- map(flds_aa_CC, ~slice(dat_aa_CC, .))    # list of k test data sets
 
 
+## 1. Test overall misclassification rates - cgMLST  # run 27/10/2022, fully re-run 20/04/23
+doParallel::registerDoParallel()
 
-## 1. Test overall misclassification rates - cgMLST  # run 27/10/2022
 # 1 axis 
-MC_CA.zero1 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=1)
+MC_CA01 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=1)
 MC_PCO1 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=1)
 MC_CAP1 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=1) # mp (prop. of variance explained by m PCO axes, aka propG)
 
 # 2 axes
-MC_CA.zero2 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2)
+MC_CA02 <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2)
 MC_PCO2 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2)
 MC_CAP2 <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2)
 
-# residualised matrices - change Dat.train, D.test, and d first!!!!
+# residualised matrices
 # what about respect.unordered.factors="partition" (the misclassification code was changed for this and is now the default)
-MC_CA02_CC <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2, residualised="CC")
-MC_PCO2_CC <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2, residualised="CC")
-MC_CAP2_CC <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2, residualised="CC")
-MC_CA02_sp <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2, residualised="Species")
-MC_PCO2_sp <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2, residualised="Species")
-MC_CAP2_sp <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2, residualised="Species")
+MC_CA02_sp <- misclass_fn(Dat.train_sp, Dat.test_sp, method="ca0", axes=2, residualised="Species")
+MC_PCO2_sp <- misclass_fn(Dat.train_sp, Dat.test_sp, d=list_of_distance_matrices_sp, method="pco", axes=2, residualised="Species")
+MC_CAP2_sp <- misclass_fn(Dat.train_sp, Dat.test_sp, d=list_of_distance_matrices_sp, method="cap", k=2, mp=95, axes=2, residualised="Species")
 
+MC_CA02_CC <- misclass_fn(Dat.train_CC, Dat.test_CC, method="ca0", axes=2, residualised="CC")
+MC_PCO2_CC <- misclass_fn(Dat.train_CC, Dat.test_CC, d=list_of_distance_matrices_CC, method="pco", axes=2, residualised="CC")
+MC_CAP2_CC <- misclass_fn(Dat.train_CC, Dat.test_CC, d=list_of_distance_matrices_CC, method="cap", k=2, mp=95, axes=2, residualised="CC")
 
 # amino acid level data # run 1/11/2022
-MC_CA2_aa <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2)
-MC_PCO2_aa <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2)
-MC_CAP2_aa <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2)
+MC_CA02_aa <- misclass_fn(Dat.train_aa, Dat.test_aa, method="ca0", axes=2)
+MC_PCO2_aa <- misclass_fn(Dat.train_aa, Dat.test_aa, d=list_of_distance_matrices_aa, method="pco", axes=2)
+MC_CAP2_aa <- misclass_fn(Dat.train_aa, Dat.test_aa, d=list_of_distance_matrices_aa, method="cap", k=2, mp=95, axes=2)
 
 # amino acid level and CC residualisation # run 2/11/2022
-MC_CA2_aa_CC <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2, residualised="CC")
-MC_PCO2_aa_CC <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2, residualised="CC")
-MC_CAP2_aa_CC <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2, residualised="CC")
+MC_CA02_aa_CC <- misclass_fn(Dat.train_aa_CC, Dat.test_aa_CC, method="ca0", axes=2, residualised="CC")
+MC_PCO2_aa_CC <- misclass_fn(Dat.train_aa_CC, Dat.test_aa_CC, d=list_of_distance_matrices_aa_CC, method="pco", axes=2, residualised="CC")
+MC_CAP2_aa_CC <- misclass_fn(Dat.train_aa_CC, Dat.test_aa_CC, d=list_of_distance_matrices_aa_CC, method="cap", k=2, mp=95, axes=2, residualised="CC")
+
+# Phandango distance matrix # run 19/04/23
+MC_CAP2_Ph <- misclass_fn(Dat.train, Dat.test, method="cap", d=list_of_distance_matrices_Phandango, k=2, mp=95, axes=2)
+
+## try different mp values to determine number of axes   # run 27/10/2022
+mp_list <- list(0,50,85,95,99)
+MC_CAP_mp <- map(mp_list, ~misclass_fn(Dat.train, Dat.test,d=list_of_distance_matrices, method="cap", k=2, mp=., axes=2))
+names(MC_CAP_mp) <- map(mp_list, ~paste("CAP",.,sep="_")) |> unlist()
+
+## Jejuni only data - check have the correct dat, Dat.train, Dat.test, and list_of_distance_matrices # run 27/10/2022
+MC_CA02_j <- misclass_fn(Dat.train_j, Dat.test_j, method="ca0", axes=2)
+MC_PCO2_j <- misclass_fn(Dat.train_j, Dat.test_j, d=list_of_distance_matrices, method="pco", axes=2)
+MC_CAP2_j <- misclass_fn(Dat.train_j, Dat.test_j, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2)
+
 
 
 # merge results
-MC_results <- list(CA01=MC_CA.zero1, 
-                   CA02=MC_CA.zero2, 
+MC_results <- c(list(CA01=MC_CA01, 
+                   CA02=MC_CA02, 
                    PCO1=MC_PCO1, 
                    PCO2=MC_PCO2, 
                    CAP1=MC_CAP1, 
@@ -109,57 +153,48 @@ MC_results <- list(CA01=MC_CA.zero1,
                    CA0_CC=MC_CA02_CC,
                    PCO_CC=MC_PCO2_CC, 
                    CAP_CC=MC_CAP2_CC,
-                   CA0_aa=MC_CA2_aa,
+                   CA0_aa=MC_CA02_aa,
                    PCO_aa=MC_PCO2_aa,
                    CAP_aa=MC_CAP2_aa, 
                    CA0_sp=MC_CA02_sp,
                    PCO_sp=MC_PCO2_sp, 
                    CAP_sp=MC_CAP2_sp,
-                   CA0_CC_aa=MC_CA2_aa_CC,
+                   CA0_CC_aa=MC_CA02_aa_CC,
                    PCO_CC_aa=MC_PCO2_aa_CC,
-                   CAP_CC_aa=MC_CAP2_aa_CC)
-#save(MC_results, file="../CAP_Data/results/MC_results.Rdata") # run 1/11/2022, updated 2/11/22
+                   CAP_CC_aa=MC_CAP2_aa_CC,
+                   CAP_Ph=MC_CAP2_Ph,
+                   CA0_j=MC_CA02_j, 
+                   PCO_j=MC_PCO2_j, 
+                   CAP_j=MC_CAP2_j), MC_CAP_mp)
+save(MC_results, file="../CAP_Data/results/MC_results.Rdata") # run 1/11/2022, updated 2/11/22, updated 19/4/23
 #load("../CAP_Data/results/MC_results.Rdata")
 
-## try different mp values to determine number of axes   # run 27/10/2022
-# check with Dat and d to use
-mp_list <- list(0,50,85,95,99)
-MC_CAP_mp <- map(mp_list, ~misclass_fn(Dat.train, Dat.test,d=list_of_distance_matrices, method="cap", k=2, mp=., axes=2))
-names(MC_CAP_mp) <- map(mp_list, ~paste("CAP",.,sep="_"))
-names(MC_CAP_mp) <- c("CAP_0",  "CAP_50", "CAP_85", "CAP_95", "CAP_99")
-#save(MC_CAP_mp, file="../CAP_Data/results/MC_CAP_mp.Rdata")
-#load("../CAP_Data/results/MC_CAP_mp.Rdata")
-
-MC_CAP_CC_mp <- map(mp_list, ~misclass_fn(Dat.train, Dat.test,d=list_of_distance_matrices, method="cap", k=2, mp=., axes=2, residualised="CC"))
-names(MC_CAP_CC_mp) <- map(mp_list, ~paste("CAP_CC",.,sep="_"))
-#save(MC_CAP_CC_mp, file="../CAP_Data/results/MC_CAP_CC_mp.Rdata")
-#load("../CAP_Data/results/MC_CAP_CC_mp.Rdata")
-
-
-## Jejuni only data - check have the correct dat, Dat.train, Dat.test, and list_of_distance_matrices # run 27/10/2022
-MC_CA.zero2_j <- misclass_fn(Dat.train, Dat.test, method="ca0", axes=2)
-MC_PCO2_j <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="pco", axes=2)
-MC_CAP2_j <- misclass_fn(Dat.train, Dat.test, d=list_of_distance_matrices, method="cap", k=2, mp=95, axes=2)
-MC_results_j <- list(CA0_j=MC_CA.zero2_j, PCO_j=MC_PCO2_j, CAP_j=MC_CAP2_j)
-#save(MC_results_j, file="../CAP_Data/results/MC_results_j.Rdata")
-#load("../CAP_Data/results/MC_results_j.Rdata")
-
-
-# merge results
-all_MC_results <- c(MC_results, MC_results_j, MC_CAP_mp, MC_CAP_CC_mp)
-#save(all_MC_results, file="../CAP_Data/results/all_MC_results.Rdata")  # 1/11/2022, updated 2/11/22
-load("../CAP_Data/results/all_MC_results.Rdata")
 # now can plot - plot_results.R
 
-ca <- all_MC_results |> map_dfr("conf.av") |> 
-  mutate(method_long = names(all_MC_results),.before=1) |> as.data.frame() |> 
+
+
+
+## 2. Test individual tree prediction accuracy - (CAP_95 and CAP_CC_95 only) cgMLST  # run 18/11/23, updated 26/04/23
+load("../CAP_Data/results/results_cgMLST.Rdata")   # from tree_data.R
+# source("methods/misclassification.R") # if didn't load earlier
+MC_all_trees <- misclass_tree_fn(results_cgMLST, class=Source)
+#save(MC_all_trees, file="../CAP_Data/results/MC_all_trees.Rdata")  # 25/11/2022, updated 26/04/23
+load(file="../CAP_Data/results/MC_all_trees.Rdata")
+
+# now can plot ("plot_results.R")
+
+
+
+
+ca <- MC_results |> map_dfr("conf.av") |> 
+  mutate(method_long = names(MC_results),.before=1) |> as.data.frame() |> 
   filter(!method_long %in% c("CAP_95","CAP_CC_95"))
-cs <- all_MC_results |> map_dfr("conf.se") |> 
-  mutate(method_long = names(all_MC_results),.before=1) |> as.data.frame() |> 
+cs <- MC_results |> map_dfr("conf.se") |> 
+  mutate(method_long = names(MC_results),.before=1) |> as.data.frame() |> 
   filter(!method_long %in% c("CAP_95","CAP_CC_95"))
-a <- all_MC_results |> map_dfr("av") |> t() |> as.data.frame() |> rownames_to_column("method_long") |> 
+a <- MC_results |> map_dfr("av") |> t() |> as.data.frame() |> rownames_to_column("method_long") |> 
   filter(!method_long %in% c("CAP_95","CAP_CC_95")) |> rename("av"="V1")
-s <- all_MC_results |> map_dfr("se") |> t() |> as.data.frame() |> rownames_to_column("method_long")|> 
+s <- MC_results |> map_dfr("se") |> t() |> as.data.frame() |> rownames_to_column("method_long")|> 
   filter(!method_long %in% c("CAP_95","CAP_CC_95"))|> rename("se"="V1")
 
 results <- reduce(list(ca,cs,a,s), right_join, by="method_long", suffix=c(".av",".se"))|> 
@@ -189,19 +224,6 @@ results |> filter(truth==prediction) |> group_by(method_long, truth) |> summaris
 
 results |> filter(truth==prediction & method=="CAP") |> group_by(method_long, truth) |> summarise(max(p)) |> ungroup() |> rename("p"=`max(p)`) |> arrange(desc(p))
 # now find tree info for CAP_95 and for CAP_CC_95
-
-
-
-
-## 2. Test individual tree prediction accuracy - (CAP_95 and CAP_CC_95 only) cgMLST  # run 18/11/23
-load("../CAP_Data/results/results_cgMLST.Rdata")
-# source("methods/misclassification.R") # if didn't load earlier
-MC_all_trees <- misclass_tree_fn(results_cgMLST)
-#save(MC_all_trees, file="../CAP_Data/results/MC_all_trees.Rdata")  # 25/11/2022
-# now can plot 
-
-
-
 
 
 # 3. Check against tree data   # run 18/11/2022
