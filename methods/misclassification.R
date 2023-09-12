@@ -1,72 +1,76 @@
-#### functions to calculate misclassification rates of the individual trees according to the presence of absent levels 
-#### as well as overall misclassification rates of the whole forests for the different methods ####
+#' functions to calculate misclassification rates of the individual trees according to the presence of absent levels 
+#' as well as overall misclassification rates of the whole forests for the different methods 
 
-## NEED TO UPDATE FOR CAP
+source("methods/tree_predictions.R")
 
-# functions
 # (1) - calculate proportion correct predictions for trees with and without unique alleles
-misclass_tree_fn <- function(dat, source="Source"){
-  df <- dat |> 
-    mutate(uses_unique = if_else(uses_unique == 0, "No", "Yes")) |>
-    group_by(method,uses_unique, source, prediction) |>
-    summarise(n=n()) |>
-    group_by(method,uses_unique,source) |>
-    mutate(N = sum(n)) |>
-    mutate(prop = n/N)
-  df
+tree_predictions <- function(data, model){
+  prep.train <- pluck(model, "train")
+  prep.test <- pluck(model, "test")
+  class <- pluck(model, "class")
+  id <- pluck(model, "id")
+  ranger_mod <- pluck(model, "ranger_mod")
+  uniques <- is_unique(data, prep.train$extra)
+  predictions <- predict_by_tree(ranger_mod, new_data=prep.test, new_unique=uniques, id={{id}})
+  tree_preds <- predictions |> left_join(data |> rename(id = {{id}}) |> select(id, any_of({{class}})), by="id")
+  tree_preds
 }
 
+tree_misclassifications <- function(testdata, model, class){
+  tree_preds <- map2_df(testdata, model, tree_predictions, .id = "fold")
+ 
+  # misclassification rates of the folds
+  tree.res <- tree_preds |> 
+    mutate(uses_unique = if_else(uses_unique == 0, "No", "Yes")) |>
+    group_by(fold, uses_unique, across(class), prediction) |>
+    summarise(n=n()) |>
+    group_by(fold, uses_unique, across(class)) |>
+    mutate(N = sum(n)) |>
+    mutate(prop = n/N)
   
-# (2) - calculate proportion correct classifications for forests (ie calculate misclassification rate)
-MC_fn <- function(Dat.train, Dat.test, d=NULL, axes=2, mp=100, m=NULL, k=2, method=ca0, ntrees=500, residualised=NULL, id="LabID", class="Source"){
-  switch(method, 
-         ca0 = {
-           train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), class="Source", axes=axes, residualised=residualised)
-           test <- prepare_test_ca0(Dat.test, train$extra, id={{id}}, residualised=residualised)
-         },
-         pco = {
-           train <- prepare_training_pco(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, residualised=residualised)
-           test <- prepare_test_pco(Dat.test, train$extra, id={{id}}, residualised=residualised)
-         },
-         cap = {  
-           train <- prepare_training_cap(Dat.train, starts_with("CAMP"), class="Source", d, axes=axes, k=k, m=m, mp=mp, residualised=residualised)
-           test <- prepare_test_cap(Dat.test, train$extra, id={{id}}, residualised=residualised)
-         }
-  )       
-  uniques <- is_unique(Dat.test, train$extra) # can delete after testing
-  set.seed(3)
-  classes <- train$training |> pull({{class}})
-  ranger_mod <- if(is.null({{residualised}})){
-    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = TRUE)
-  } else {
-    ranger(classes ~ ., data=train$training |> select(-{{class}}), oob.error = TRUE, num.trees=ntrees, respect.unordered.factors = "partition", 
-           always.split.variables = {{residualised}})
-  }
-  preds_ranger <- predict(ranger_mod, data=test, predict.all = FALSE)$predictions
-  df <- data.frame(id = test |> pull({{id}}), preds = preds_ranger) |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))
+  # overall misclassification rate
+  tree.mc <- tree_preds |> mutate(uses_unique = if_else(uses_unique == 0, "No", "Yes")) |>
+    group_by(uses_unique, across(class), prediction) |>
+    summarise(n=n()) |>
+    group_by(uses_unique, across(class)) |>
+    mutate(N = sum(n)) |>
+    mutate(prop = n/N)
+  tree.yes <- tree.mc |> ungroup() |> filter(uses_unique=="Yes") |> arrange(desc(prop)) |> 
+    select(all_of(class), prediction, prop) 
+  tree.no <- tree.mc |> ungroup() |> filter(uses_unique=="No") |> arrange(desc(prop)) |> 
+    select(all_of(class), prediction, prop)
+  tree.mc <- right_join(tree.yes, tree.no, by=c({{class}}, "prediction"), suffix=c(".yes",".no"))
   
-  tree_preds_ranger <- predict(ranger_mod, data=test, predict.all = TRUE)$predictions |> as.data.frame() |> 
-    mutate(id = test |> pull({{id}})) |> left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}})) |> 
-    pivot_longer(-c(id, {{class}}), names_to="tree", values_to="values") |> 
-    left_join(data.frame(values = seq_along(ranger_mod$forest$levels), prediction = ranger_mod$forest$levels)) |>  # NOTE: ranger has a mod$forest$class.values that seems though it's not supposed to be used???
-    mutate(tree = as.numeric(substring(tree, 2))) |> 
-    select(id, tree, {{class}}, prediction)
-  
-  tree_preds_JM <- predict_by_tree(ranger_mod, test, uniques, id=id, residualised=residualised) |> 
-    left_join(Dat.test |> rename(id = {{id}}) |> select(id, {{class}}))# can delete after testing
-  
-  out <- list(MC = df, tree_preds_ranger=tree_preds_ranger, tree_preds_JM = tree_preds_JM)# replace with 'df' after testing
+  out=list(tree.res=tree.res, tree.mc=tree.mc)
   out
 }
 
-calc_misclassification <- function(df) {
+
+# (2) - calculate proportion correct classifications for forests (ie calculate misclassification rate)
+forest_predictions <- function(data, model){
+  prep.test <- pluck(model, "test")
+  class <- pluck(model, "class")
+  id <- pluck(model, "id")
+  ranger_mod <- pluck(model, "ranger_mod")
+  predictions <- predict(ranger_mod, data=prep.test, predict.all = FALSE)$predictions
+  forest_preds <- data.frame(id = prep.test |> pull(id), prediction = predictions) |> 
+    left_join(data |> rename(id = {{id}}) |> select(id, any_of({{class}})), by="id")
+  forest_preds
+}
+
+
+forest_misclassifications <- function(testdata, model, class) {
+  # forest predictions
+  forest_preds <- map2_df(testdata, model, forest_predictions, .id = "fold")
+  
   # weights for each fold
-  w <- df |> group_by(Fold) |> tally() |> pull(n)
+  w <- forest_preds |> group_by(fold) |> tally() |> pull(n)
   
   # misclassification rates of the folds
-  lm <- df |> 
-    mutate(wrong = truths != preds) |>
-    group_by(Fold) |>
+  lm <- forest_preds |> 
+    rename(truths = {{class}}) |> 
+    mutate(wrong = truths != prediction) |>
+    group_by(fold) |>
     summarise(miss = sum(wrong)/n()) |> 
     lm(miss ~ 1, weights = w, data=_) |> summary()
   
@@ -75,26 +79,47 @@ calc_misclassification <- function(df) {
   se <- coef(lm)[,"Std. Error"]
   
   # confusion matrix
-  conf <- df |> 
-    group_by(Fold, truths, preds) |> 
+  conf <- forest_preds |> 
+    rename(truths = {{class}}) |> 
+    group_by(fold, truths, prediction) |> 
     summarise(n=n()) |> 
     mutate(N=sum(n), p=n/sum(n)) |> 
     ungroup() |>
-    mutate(w = as.numeric(paste(factor(Fold, labels=w))), t_p = paste(truths, preds, sep="_")) |> 
+    mutate(w = as.numeric(paste(factor(fold, labels=w))), t_p = paste(truths, prediction, sep="_")) |> 
     split(~t_p)
-
+  
   # weighted mean and standard error of the confusion matrices
   conf.lm <- map(conf, function(x) {lm(p~1, weights=w, data=x) |> summary()})
   conf.av <- map(conf.lm, function(x) coef(x)[,"Estimate"])
   conf.se <- map(conf.lm, function(x) coef(x)[,"Std. Error"])
-
-  out <- list(av=av, se=se, conf.av=conf.av, conf.se=conf.se)
+  
+  # overall misclassification rate
+  forest.mc <- forest_preds |> group_by(across(class), prediction) |> 
+    summarise(n=n()) |> mutate(N = sum(n)) |> mutate(prop = n/N) |> select(-n,-N) 
+  
+  out <- list(av=av, se=se, conf.av=conf.av, conf.se=conf.se, forest.mc=forest.mc)
   out
 }
 
-misclass_fn <- function(Dat.train, Dat.test, method=ca0, class="Source", id="LabID", d=NULL, k=2, m=NULL, mp=100, axes=2, ntrees=500, residualised=NULL){
-  DF <- map2_dfr(Dat.train, Dat.test, ~MC_fn(.x,.y,method={{method}},d=d, k=k, m=m, mp=mp, axes=axes, ntrees=ntrees, residualised=residualised), .id="Fold")
-  DF# can delete after testing
-  #answer <- calc_misclassification(DF) #change back after testing
-  #answer
+mc_function <- function(Dat.test.list, model.info.list, class, tree=TRUE, forest=TRUE){
+  if(forest){
+    # forest predictions
+    forest.mc <- forest_misclassifications(Dat.test.list, model.info.list, class={{class}})$forest.mc
+    results <- forest.mc
+  }
+  
+  if(tree){
+    # tree predictions
+    tree.mc <- tree_misclassifications(Dat.test.list, model.info.list, class={{class}})$tree.mc
+    results <- tree.mc
+  }
+  
+  if(forest & tree){
+    # merge forest and tree results
+    results <- left_join(tree.mc, forest.mc, by=c(class, "prediction")) |> 
+      rename(tree.absent=prop.yes,tree.no.absent=prop.no,forest=prop)
+  }
+  
+  # output
+  results
 }

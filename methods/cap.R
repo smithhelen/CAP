@@ -10,43 +10,44 @@ epsilon <- sqrt(.Machine$double.eps)
 # Output is both the score information for the variable (i.e. a vector of the same length as the input vector) and
 # the level mapping data.frame (mapping from var_level to score)
 
-factor_to_CAP_score <- function(var, dist, class, k, m, mp, axes) {
+factor_to_CAP_score <- function(var, dist, m, class, k, mp, c) {
   var_levels <- droplevels(var)
   #N <- nlevels(var_levels)
   d.train <- dist[levels(var_levels),levels(var_levels),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)  #B is same as Gowers matrix G
   eigen_B <- eigen_decomp(B.train, symmetric=TRUE)
-  # use only non-zero eigenvalues
-  nlambdas <- sum(eigen_B$values > epsilon)
+  # use only non-zero PCO eigenvalues
+  nlambdas <- sum(eigen_B$values > epsilon) # this is not affected by axes (c) for CAP
   if (nlambdas == 0) {
     # No non-zero eigenvectors
     return(NULL)
   }
-  ct <- table(Var_level=var_levels,Class=class)
-  H <- hat(ct, k=k)
-  lambda_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=m, mp=mp)
+  ct <- table(Var_level=var_levels, Class=class)
+  H <- hat(ct, k=k) # restrict ct to k axes, if k is null then k=ncol(ct)-1
+  lambda_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=m, mp=mp) # restrict by m or mp
   Qo <- eigen_B$vectors[, seq_along(lambda_B), drop=FALSE]  # note that this is different to the Q score in PCO method which is scaled by the sqrt(abs(lambdas_B))
   QHQ <- t(Qo) %*% H %*% Qo   # Combine Qo and H to get C_score
   eigen_QHQ <- eigen_decomp(QHQ, symmetric=TRUE)
   # select number of axes to retain
-  lambda_QHQ <- filter_eigenvalues(eigen_QHQ$values, m=axes)
+  if(is.null(c)){c <- ncol(ct)-1}
+  lambda_QHQ <- filter_eigenvalues(eigen_QHQ$values, m=c)
   U <- eigen_QHQ$vectors[,seq_along(lambda_QHQ),drop=FALSE]
   C_score <- Qo %*% U
   # Fill C_scores to individual isolates.  
   score <- left_join(data.frame(Var_level = var_levels), data.frame(C_score) |> rownames_to_column("Var_level"), by = "Var_level")
   Output <- score |> dplyr::select(-Var_level)
   list(output = Output,
-       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B, 
-                    U=U, Qo=Qo, C_score=C_score, num_vars = ncol(C_score), var_names = colnames(C_score)))
+       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), lambda_B=lambda_B,  
+                    U=U, Qo=Qo, C_score=C_score, dim = ncol(C_score), suffix = colnames(C_score)))
 }
 
-prepare_training_cap <- function(data, vars, class, d, k=2, m=NULL, mp=100, axes, residualised=NULL) {
+prepare_training_cap <- function(data, vars, class, d, k=NULL, m=NULL, mp=100, c=NULL, residualised=NULL) {
   # pull out our var_cols and class
   var_cols <- dplyr::select(data,all_of(vars))
   classes   <- data |> pull(class)
   # iterate over the var columns and distance matrices, and convert
-  prepped <- map2(var_cols, d, factor_to_CAP_score, class = classes, k, m, mp, axes) |> compact() # removes empties
+  prepped <- map2(var_cols, d, factor_to_CAP_score, m, class = classes, k, mp, c) |> compact() # removes empties
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))

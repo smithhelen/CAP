@@ -1,4 +1,4 @@
-## Helper functions for Ranger methods
+## Helper functions for CAP methods
 
 # Load libraries
 library(FactoMineR) #for CA function within hat()
@@ -28,6 +28,9 @@ eigen_decomp <- function(X, symmetric) {
 
 # Hat function
 hat <- function(ct, k){
+  if(is.null(k)){
+    k <- ncol(ct)-1
+  }
   ca1 <- CA(ct, ncp=k, graph=FALSE) #requires FactoMineR
   capX <- get_ca_row(ca1)$coord #requires factoextra
   centX <- sweep(as.matrix(capX), 2, colMeans(as.matrix(capX)), '-')
@@ -38,10 +41,13 @@ hat <- function(ct, k){
 # Filter out eigenvalues based on some criteria
 filter_eigenvalues <- function(ev, m = NULL, mp = 100) {
   if(is.null(m)){
+    if(is.null(mp)){
+      mp <- 100
+      message(paste("m and mp are NULL, mp defaults to 100"))
+      }
     VarExp <- cumsum(ev/sum(ev)*100)
     m <- min(which(round(VarExp,0) >= mp)) #round to avoid error (when rounding error makes it not quite 100, leading to Inf)
   }
   m <- min(m, length(ev))
   ev[seq_len(m)]
 }
-

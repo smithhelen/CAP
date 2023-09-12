@@ -9,9 +9,9 @@ epsilon <- sqrt(.Machine$double.eps)
 
 # Output is both the score information for the variable (i.e. a vector of the same length as the input vector) and
 # the level mapping data.frame (mapping from var_level to score)
-factor_to_pco_score <- function(var, dist, axes) {
-  var_levels <- droplevels(var)
-  d.train <- dist[levels(var_levels),levels(var_levels),drop=FALSE]
+factor_to_pco_score <- function(var, dist, m, mp) {
+  var <- droplevels(var)
+  d.train <- dist[levels(var),levels(var),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)
   eigen_B <- eigen_decomp(B.train, symmetric=TRUE)
@@ -21,25 +21,24 @@ factor_to_pco_score <- function(var, dist, axes) {
     # No non-zero eigenvectors
     return(NULL)
   }
-  # Restrict to a maximum of eigenvectors set by "axes" (default is 2)
-  nlambdas <- min(nlambdas, axes)
+  # Restrict to a maximum of eigenvectors set by "m" or "mp (propG)" (default is mp=100% variation)
+  lambdas_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=m, mp=mp) # restrict by axes or mp
   # Scale eigenvectors
-  lambdas_B <- eigen_B$values[seq_len(nlambdas)]
   Qo <- eigen_B$vectors
-  Q <- sweep(Qo[, seq_len(nlambdas), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
-  score <- left_join(data.frame(Var_Level = var_levels), data.frame(Q) |> rownames_to_column("Var_Level"), by = "Var_Level")
+  Q <- sweep(Qo[, seq_along(lambdas_B), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
+  score <- left_join(data.frame(Var_Level = var), data.frame(Q) |> rownames_to_column("Var_Level"), by = "Var_Level")
   output <- score |> select(-Var_Level)
   list(output = output,
-       extra = list(d=dist, var_levels=levels(var_levels), diag.B.train=diag(B.train), Q=Q, lambdas_B=lambdas_B, 
-                    num_vars = ncol(Q), var_names = colnames(Q)))
+       extra = list(d=dist, var_levels=levels(var), diag.B.train=diag(B.train), Q=Q, lambdas_B=lambdas_B, 
+                    dim = ncol(Q), suffix = colnames(Q), propG = eigen_B$values))
 }
 
-prepare_training_pco <- function(data, vars, class, d, axes=2, residualised=NULL) {
+prepare_training_pco <- function(data, var_cols, class, d, m=NULL, mp=100, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,all_of(vars))
+  var_cols <- dplyr::select(data, all_of(var_cols))
   classes   <- data |> pull(class)
   # iterate over the var columns and distance matrices, and convert
-  prepped <- map2(var_cols, d, factor_to_pco_score, axes) |> compact() # removes empties
+  prepped <- map2(var_cols, d, factor_to_pco_score, m, mp) |> compact() # removes empties
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()),
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
@@ -77,13 +76,13 @@ impute_score_pco <- function(var, extra) {
          select(-Var_Level))
 }
 
-prepare_test_pco <- function(data, extra, id, residualised=NULL) {
-  var_cols <- data |> select(any_of(names(extra)))
-  newdata_score <- map2(var_cols, extra, impute_score_pco)
+prepare_test_pco <- function(data, list_of_extras, id, residualised=NULL) {
+  test_data <- data |> select(any_of(names(list_of_extras)))
+  newdata_score <- map2(test_data, list_of_extras, impute_score_pco)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(data |> select(all_of(id),all_of(residualised)), newdata_pred)
+    bind_cols(data |> select(all_of(id), all_of(residualised)), newdata_pred)
   } else {
     bind_cols(data |> select(all_of(id)), newdata_pred)
   }
