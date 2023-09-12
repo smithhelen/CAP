@@ -1,93 +1,84 @@
-## Useful for testing the code is running
-## Source attribution of the sample data using the different methods
-
 # Load libraries and functions
 source("methods/libs_fns.R")
+source("methods/tree_predictions.R")
 
-# Load data
-load("../CAP_Data/data/cgMLST_dat.RData") # SACNZ cgMLST data set (jejuni and coli)
-Dat_jc <- cgMLST |> mutate(across(everything(), factor)) |> 
-  mutate(Source = factor(Source, levels = c("Beef", "Poultry", "Sheep", "Human"))) |>
-  mutate(Source = fct_recode(as.factor(Source), Cattle="Beef", Chicken="Poultry")) 
 
-load("../CAP_Data/data/list_of_distance_matrices_all.RData") #  distance matrices of hamming distances among unique alleles for each gene
-list_of_distance_matrices <- map(list_of_distance_matrices_all, as.matrix)
+# Load sample data 
+# data is genetic data with alleles (levels) from 10 genes (variables) across 3 sources (classes), n=10 for each source
+load("../CAP_data/data/sample_run_data.RData") # sample data
+load("../CAP_data/data/sample_run_SeqDat.RData") # sequence information for sample data
 
-# Subset data
-small_dat <- cgMLST |> select(LabID, Source, sample(2:1344,10))
-genes <- small_dat |> select(starts_with("CAMP")) |> colnames()
-small_d <- list_of_distance_matrices[genes]
 
-# Create data splits
-Dat.train <- small_dat |> filter(Source != "Human") |> droplevels() 
-Dat.test <- small_dat |> filter(Source == "Human") |> droplevels() 
 
+# Prepare data
+# calculate hamming distances between levels of predictor variable
+source("methods/hamming.R")
+genes <- names(SeqDat |> select(starts_with("Var")))
+list_of_distance_matrices <- map(genes, ~ dfun(gene=., dat=LostInTheForest, seqdat=SeqDat))
+names(list_of_distance_matrices) <- genes
+list_of_distance_matrices <- map(list_of_distance_matrices, as.matrix)
+
+# Training data is the source data
+Dat.train <- LostInTheForest |> filter(class != "Human") |> droplevels() |> mutate(across(everything(), factor)) 
+
+# Test data is the human data to be attributed to a source
+Dat.test <- LostInTheForest |> filter(class == "Human") |> droplevels() |> mutate(across(everything(), factor)) 
+
+
+
+## Source attribution of the sample data using the different methods
 # prepare data using method of choice:
-# 1. ca unbiased method, 1 axis
-train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=1)
-test <- prepare_test_ca0(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
+#' reminder of terminology: k = number ca axes (default is num.classes-1), 
+#'                          m = number pco axes (default is num.classes-1), 
+#'                          mp = propG (default is 100%), 
+#'                          c = number cap axes (default is num.classes-1)
+#'                          kc = number ca axes within cap (default is num.classes-1)
+
+# 1. ca method
+train <- prepare_training_ca(Dat.train, starts_with("Var"), "class")
+test <- prepare_test_ca(Dat.test, train$extra, "id") 
+
+# 2. binary method
+train <- prepare_training_binary(Dat.train, starts_with("Var"), "class")
+test <- prepare_test_binary(Dat.test, train$extra, "id")
+
+# 3. ca unbiased method
+train <- prepare_training_ca0(Dat.train, starts_with("Var"), "class")
+test <- prepare_test_ca0(Dat.test, train$extra, "id")
+
+# 4. pco method
+train <- prepare_training_pco(Dat.train, starts_with("Var"), "class", d=list_of_distance_matrices, mp=99)
+test <- prepare_test_pco(Dat.test, train$extra, "id")
+
+# 5. cap method
+train <- prepare_training_cap(Dat.train, starts_with("Var"), "class", d=list_of_distance_matrices, mp=99)
+test <- prepare_test_cap(Dat.test, train$extra, "id")
+
+
+
+## generate random forest models:
+# 1. for binary method:
+rf_mod <- ranger(dependent.variable.name = "class", data = train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
+
+# 2. for other methods:
+rf_mod <- ranger(class ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
+
+
+
+## make predictions for Human data
 Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
 table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
 
-# 2. ca unbiased method, 2 axes
-train <- prepare_training_ca0(Dat.train, starts_with("CAMP"), "Source", axes=2)
-test <- prepare_test_ca0(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
-Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
-table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
-
-# 3. pco method, 1 axis
-train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d=small_d, axes=1)
-test <- prepare_test_pco(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
-Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
-table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
-
-# 4. pco method, 2 axes
-train <- prepare_training_pco(Dat.train, starts_with("CAMP"), "Source", d=small_d, axes=2)
-test <- prepare_test_pco(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
-Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
-table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
-
-# 5. cap method, 1 axis
-train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, k=2, mp=95, axes=1)
-test <- prepare_test_cap(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
-Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
-table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
-
-# 6. cap method, 2 axes
-train <- prepare_training_cap(Dat.train, starts_with("CAMP"), "Source", d=small_d, k=2, mp=95, axes=2)
-test <- prepare_test_cap(Dat.test, train$extra, "LabID")
-rf_mod <- ranger(Source ~ ., data=train$training, oob.error = TRUE, num.trees=500, respect.unordered.factors = TRUE)
-Prediction <- predict(rf_mod, data=test, predict.all = FALSE)$predictions
-table(Prediction) |> as.data.frame() # counts of predictions for each source
-#uniques <- is_unique(Dat.test, train$extra)
-#tree_preds <- predict_by_tree(rf_mod, test, uniques)
-#answer <- tree_preds |> left_join(Dat.test |> rename(row = id) |> select(row, class))
-#answer
+## pull out individual tree decisions for each observation
+uniques <- is_unique(Dat.test, train$extra)
+tree_preds <- predict_by_tree(rf_mod, test, uniques)
+answer <- tree_preds |> left_join(Dat.test |> select(id, class))
+answer
 
 
-
+if(0){
+# test with variable with single level in training
+Dat.train <- LostInTheForest %>% filter(class != "Human") |> mutate(Var01 = factor(10)) %>% droplevels() %>% mutate(across(everything(), factor)) 
+train <- prepare_training_pco(Dat.train, starts_with("Var"), "class", d=list_of_distance_matrices, axes=1)
+test <- prepare_test_pco(Dat.test, train$extra, "id")
+}

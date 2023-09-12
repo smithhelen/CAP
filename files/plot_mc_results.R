@@ -5,17 +5,12 @@ library(gridExtra)
 #library(ggplot2)
 
 ## Load results for plotting 
-# 1. tree predictions
-load("../CAP_Data/results/MC_all_trees.Rdata")
-
-# 2. cross_validation.R (overall misclassification
-load("../CAP_Data/results/MC_results.Rdata")
-
+load("../CAP_Data/results/cgMLST_mc_results.Rdata")
 
 ## prepare data for plotting
-plot_dat <- MC_all_trees |> 
+plot_dat <- cgMLST_mc_results |> 
   mutate(method_long = factor(method, levels=c("CA0","PCO","CAP",
-                                               "CAP_Ph",
+                                               "PCO_Ph", "CAP_Ph",
                                                "CA0_CC","PCO_CC","CAP_CC", 
                                                "CA0_sp","PCO_sp","CAP_sp", 
                                                "CA01","CA02","PCO1","PCO2","CAP1","CAP2",
@@ -26,27 +21,60 @@ plot_dat <- MC_all_trees |>
   mutate(
     method = substr(method_long, 1, 3) |> factor(levels=c("CA0","PCO","CAP")),
     species = ifelse(method_long |> str_detect("j"),"j","jc") |> factor(levels=c("j", "jc")),
-    axes = ifelse(method_long |> str_detect("1"),1,2),
+    axes = ifelse(method_long |> str_detect("1"),1,2) |> factor(levels=c("1","2")),
     residualised = ifelse(method_long |> str_detect("CC"),"CC", ifelse(method_long |> str_detect("sp"), "species", "no")) |> factor(levels=c("no", "species", "CC")),
     level = ifelse(method_long |> str_detect("aa"),"aa","nt") |> factor(levels=c("nt", "aa")), 
-    mp = ifelse(method_long |> str_extract("_[0-9]+") |> is.na(), 95, method_long |> str_extract("[0-9]+") |> as.numeric()),  
+    mp = ifelse(method_long |> str_extract("_[0-9]+") |> is.na(), 95, method_long |> str_extract("[0-9]+") |> as.numeric()) |> factor(levels = c("0","50","80", "95","99")),  
     .before=2) |> 
-  mutate(pch = ifelse(Source==prediction, 21,1))
+  mutate(pch = ifelse(Source==prediction, 21,1)) |> 
+  pivot_longer(cols=c(tree.absent, tree.no.absent, forest), names_to = "result", values_to = "p") |> 
+  mutate(across(where(is.character), factor)) 
 
-plot_dat2 <- MC_results |> map_dfr("conf.av") |> 
-  mutate(method_long = names(MC_results),.before=1) |> as.data.frame() |> 
-  filter(!method_long %in% c("CAP_95","CAP_CC_95")) |> 
-  mutate(
-    method = substr(method_long, 1, 3) |> factor(levels=c("CA0","PCO","CAP")),
-    species = ifelse(method_long |> str_detect("j"),"j","jc"),
-    axes = ifelse(method_long |> str_detect("1"),1,2),
-    residualised = ifelse(method_long |> str_detect("CC"),"CC",ifelse(method_long |> str_detect("sp"), "species","no")),
-    level = ifelse(method_long |> str_detect("aa"),"aa","nt"), 
-    mp = ifelse(method_long |> str_extract("_[0-9]+") |> is.na(), 95, method_long |> str_extract("[0-9]+") |> as.numeric()),  
-    .before=2) |> 
-  pivot_longer(starts_with(c("Cattle","Chicken","Sheep")), names_to = "T_P", values_to = "p") |> rowwise() |> 
-  mutate(truth = str_split(T_P, "_|\\.")[[1]][1], prediction = str_split(T_P, "_|\\.")[[1]][2]) |> 
-  mutate(pch = ifelse(truth==prediction, 21,1))
+
+
+
+
+#forest results
+p1 <- plot_dat |> filter(method_long %in% c("CA0", "PCO", "CAP")) |> 
+  filter(result == "forest") |> 
+  filter(prediction == Source) |> 
+  ggplot(aes(x=prediction, y=p)) + 
+  geom_point(aes(colour=Source, shape=I(pch), bg=Source), size=3) +
+  theme_bw(base_size = 11) + 
+  scale_y_continuous("Proportion of predictions\n",expand=c(0.03,0.03),limits=c(0,1)) +
+  #theme(legend.position = "bottom") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(strip.text.y = element_text(size = 8)) +
+  facet_wrap(~method, nrow=1) +
+  labs(x="\nPredicted Source", colour="True Source", bg="True Source")
+
+p1
+
+#tree results
+p2 <- plot_dat |> filter(method_long %in% c("CA0", "PCO", "CAP")) |> 
+  filter(result != "forest") |> 
+  ggplot(aes(x=prediction, y=p, group=result)) + 
+  geom_point(aes(colour=result, shape=I(pch), bg=result), size=3) +
+  geom_line(aes(colour=result)) +
+  theme_bw(base_size = 11) + 
+  scale_y_continuous("Proportion of predictions\n",expand=c(0.03,0.03),limits=c(0,1)) +
+  theme(legend.position = "bottom") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        strip.text.y = element_text(size = 8)) +
+  facet_grid(Source~method) +
+  scale_colour_manual(values=c("#9d1001","#019d10"), labels=c("Yes", "No")) + 
+  scale_fill_manual(values=c("#9d1001","#019d10"), labels=c("Yes", "No")) + 
+  labs(x="\nPredicted census region", colour="Absent levels used in prediction", bg="Absent levels used in prediction")
+
+p2
+
+png("plot1.png", width=960, height = 1024)
+p1
+dev.off()
+
+png("plot2.png", width=960, height = 1024)
+p2
+dev.off()
 
 
 ## plots
@@ -240,7 +268,7 @@ p10 <- plot_dat2 |>
              labeller=labeller(truth=c(Cattle="True Cattle",Chicken="True Chicken",Sheep="True Sheep"))) +
   scale_y_continuous("Proportion of predictions\n",expand=c(0.03,0.03),limits=c(0,1)) +
   labs(x="\nPredicted Source", y="Proportion of predictions\n", colour = "Method", linetype = "Method", bg="Method") +
-    theme(plot.subtitle = element_text(hjust=0.5))
+  theme(plot.subtitle = element_text(hjust=0.5))
 p10
 
 
