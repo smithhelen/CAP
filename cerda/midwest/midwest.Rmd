@@ -1,0 +1,452 @@
+---
+title: "Midwest survey from Cerda et al 2018"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 5)
+library(tidyverse)
+library(here)
+```
+
+```{r, echo=FALSE}
+colorize <- function(x, color) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color,
+      x)
+  } else x
+}
+```
+
+### `r colorize("Try tidymodels method on midwest survey data and compare Cerda's distance encoding vs pco", "blue")`
+
+### 1. Load data
+
+Midwest survey data from Cerda et al 2018.  
+Survey to know if people self-identify as Midwesterners.  
+Sample size:  2,778.   
+Target variable (multiclass-clf): ‘Location (Census Region)’ (9 classes) - Cerda says 10 so perhaps includes missing, although they remove these rows anyway.
+Cerda selected categorical variable: ‘In your own words, what would you call the part of the country you live in now?’ (cardinality: 1,008) - again Cerda had extra one perhaps for missing.  
+Other explanatory variables: ‘Personally identification as a Midwesterner?’ (4 levels, ordinal), ‘Gender’ (2 levels), ‘Age’ (4 levels, ordinal), ‘Household Income’ (5 levels, ordinal), ‘Education’ (5 levels, ordinal), ‘Illinois (IL) in the Midwest?’, ‘IN?’, ‘IA?’, ‘KS?’, ‘MI?’, ‘MN?’, ‘MO?’, ‘NE?’, ‘ND?’, ‘OH?’, ‘SD?’, ‘WI?’, ‘AR?’, ‘CO?’, ‘KY?’, ‘OK?’, ‘PA?’, ’WV?’, ’MT?’, ‘WY?’ (each of these last variables are indicator variables, although an individual can belong to more than one).
+
+```{r}
+#midwest_raw <- read.csv("midwest_survey.csv", header=T, na.strings=c(""," ","NA"))
+midwest_raw <- read.csv(here("cerda","midwest","midwest_data","midwest_survey.csv"), header=T, na.strings=c(""," ","NA"))
+str(midwest_raw)
+midwest_raw |> map_df(function(x){x |> as.factor() |> nlevels()}) |> t()
+```
+
+**Data preprocessing following Cerda 2018:**
+
+-- remove rows with missing values for the target variable or in any explanatory variable other than the selected categorical variable (reduces to 2421 observations);  
+-- for the selected categorical variable replace missing entries by the string ‘nan’;  
+-- transform all entries for the categorical variable to lower case;  
+-- convert all variables to ordinal, binary, or nominal factors (note this is different to Cerda who one-hot encoded them all);  
+-- standardize every column of Cerda's feature matrix to a unit variance.   
+
+Remember that for a probability forest to work, we can't have blank cells, so na needs to be replaced with a non-empty string.  
+
+`r colorize("Q1 - do I convert all variables to factors or just the character ones?", "red")` - `r colorize("JM : it makes no difference", "blue")`  
+I will convert the indicator variables to factors as well (the individual levels are binary but the factor itself isn't as it has 1's in multiple columns)
+
+
+```{r}
+midwest_tidy <- midwest_raw |> 
+  # remove id because it contains rows that will be removed
+  select(-id) |> 
+  # fill in binary zeros
+  mutate(across(IL:WY, \(.) {replace(.,is.na(.),0)})) |> 
+  # remove rows with missing values for the target variable census_region
+  filter(!is.na(census_region)) |> 
+  # remove na from categorical_variable to avoid na in distance matrix
+  # need to change to string (rather than "") so can use tidymodels with probability forests
+  mutate(across(categorical_variable, \(.) {replace(.,is.na(.),"nan")})) |> 
+  # remove rows with missing values for explanatory variables other than the selected categorical variable
+  drop_na(where(is.character)) |> 
+  # transform all entries for the categorical variable to lower case
+  mutate(categorical_variable = tolower(categorical_variable)) |> 
+  # re-add id
+  rownames_to_column("id") |> 
+  # convert ordinal variables to ordered factors
+  mutate(education = factor(education, levels=c("Some college", "Less than high school degree", "High school degree", "Associate or bachelor degree", "Graduate degree"), ordered=TRUE, exclude = NULL), 
+         age = factor(age, levels=c("18-29", "30-44", "45-60", "> 60"), ordered=TRUE, exclude = NULL), 
+         household_income = factor(household_income, levels=c("$0 - $24,999", "$25,000 - $49,999", "$50,000 - $99,999", "$100,000 - $149,999", "$150,000+"), ordered=TRUE, exclude = NULL),
+         personal_id = factor(personal_id, levels=c("Not at all","Not much","Some","A lot"), ordered=TRUE, exclude = NULL)) |> 
+  # convert other variables to factors
+  mutate(across(!where(is.factor), factor))
+
+str(midwest_tidy)
+
+```
+
+**Calculate distance matrix** - Levenshtein distance "lv" ("hamming" only works when strings are the same length)
+
+```{r}
+d <- stringdist::stringdistmatrix(midwest_tidy$categorical_variable, midwest_tidy$categorical_variable, method = "lv", useNames = "names") 
+
+d.pco <- stringdist::stringdistmatrix(midwest_tidy$categorical_variable |> unique(), midwest_tidy$categorical_variable |> unique(), method = "lv", useNames = "strings") 
+
+```
+
+**Calculate PCO scores**
+
+```{r, message=FALSE}
+source("../../methods/helpers.R")       # Functions used internally in the methods
+epsilon <- sqrt(.Machine$double.eps)
+mp <- 95
+A <- -0.5 * d.pco^2
+B <- dbl_center(A)
+eigen_B <- eigen_decomp(B, symmetric=TRUE)
+lambdas_B <- filter_eigenvalues(eigen_B$values, mp=mp) 
+Qo <- eigen_B$vectors
+Q <- sweep(Qo[, seq_len(length(lambdas_B)), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*") # Scale eigenvectors
+colnames(Q) <- paste0("PCO.",1:ncol(Q))
+PCO <- data.frame(Q) |> rownames_to_column("categorical_variable")
+
+```
+
+Merge the data with the encoded categorical variable and do the last step of the data-preprocessing:  
+-- standardize every column of Cerda's feature matrix to a unit variance (for d method not for pco method).
+
+```{r, message=FALSE}
+midwest <- midwest_tidy |> 
+  left_join(d |> as.data.frame() |> rownames_to_column("id") |> mutate(id=factor(id)), by="id") |> 
+  left_join(PCO |> mutate(categorical_variable=factor(categorical_variable)), by="categorical_variable") |> 
+  #standardize every column of the feature matrix to a unit variance.
+  mutate(across(starts_with("V"), scale))
+
+midwest |> as_tibble()
+
+```
+
+Method A is the distance method of Cerda. Here, the 'story' variable has been split into `r {midwest |> select(starts_with("V")) |> ncol()}` distance variables.  
+Method B is our pco method. Now the 'story' variable has undergone feature reduction and only has `r {midwest |> select(starts_with("PCO")) |> ncol()}` pco variables (which captures `r {mp}`% of the variation).
+
+### 2. Build models
+
+**Split the data**
+
+Cerda : Cross-validation. For every prediction task, we made 100 random splits of the data, with 20% of samples for testing at each time.
+
+`r colorize("Q2 - at what point do I split the data?  I could do it here and repeat 100 times, or with crossvalidation folds?", "red")` - `r colorize("JM : Cerda did 100 repeats, this is fine for comparing medians and boxplots but makes calculation of standard errors difficult due to the observations being repeated and so no longer independent", "blue")`
+
+```{r, message=FALSE}
+library(tidymodels)
+
+set.seed(123)
+data_split <- initial_split(midwest, prop = 0.8)
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+```
+
+**Define the random forest model**
+
+A ranger probability forest is always fit using tidymodels unless the probability argument is changed via set_engine. 
+The default respect.unordered.factors parameter is NULL (aka FALSE or "ignore") so I will change it to TRUE (aka "order") although this isn't strictly necessary when factors are converted to binary
+
+```{r}
+rf_mod <- 
+  rand_forest(trees = 500)  |>  
+  set_engine("ranger", respect.unordered.factors = TRUE) |> 
+  set_mode("classification")
+
+```
+
+**Preprocess the data** (create a recipe)
+
+-- Specify any variables which are not predictors (update_role)  
+-- One-hot encode all nominal predictors (step_dummy)  
+-- Check for singular dummy columns (step_zv)  
+
+step_dummy internally uses  `make.names()` which will change "illegal" characters to dots. This means a `level-like-this` and a 'level like this` will both become a `level.like.this` which will make problems for the dummy dataframe as it will have replicate column names. So fix before hand :-)
+
+```{r}
+new_levels <- levels(train_data$categorical_variable) |> make.names(unique=TRUE)
+levels(train_data$categorical_variable) <- new_levels
+
+```
+
+
+The different encoding methods  will use different columns of data. 
+Define the core variables which will be used by both methods (in the formula).
+
+```{r}
+core_vars <- midwest |> select(!starts_with("V") & !starts_with("PCO") & -categorical_variable) |> colnames()
+pco_vars <- c(core_vars, midwest |> select(starts_with("PCO")) |> colnames())
+d_vars <- c(core_vars, midwest |> select(starts_with("V")) |> colnames()) 
+```
+
+`r colorize("Q3 - do I need **data = train_data** here or the full data set?", "red")` - `r colorize("JM : it makes no difference", "blue")`  
+
+```{r}
+rf_recipe.d <- recipe(census_region ~ ., data = train_data |> select(all_of(d_vars))) |> 
+  update_role(id, respondent, new_role = "ID") |> 
+  step_dummy(all_nominal_predictors(),one_hot=TRUE) |> 
+  step_zv(all_predictors()) 
+#summary(rf_recipe.d)
+
+rf_recipe.pco <- recipe(census_region ~ ., data = train_data |> select(all_of(pco_vars))) |> 
+  update_role(id, respondent, new_role = "ID") |> 
+  step_dummy(all_nominal_predictors(),one_hot=TRUE) |> 
+  step_zv(all_predictors()) 
+
+```
+
+Before using `prep()` the recipe steps have been defined but not actually run or implemented. The `prep()` function is where everything gets evaluated. `juice()` will get the preprocessed data back out.
+
+```{r}
+rf_prep.pco <- prep(rf_recipe.pco)
+rf_juiced.pco <- juice(rf_prep.pco)
+
+```
+
+
+**Define workflow** (bundle the model and recipe)
+
+```{r}
+rf_workflow.d <- workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(rf_recipe.d)
+
+rf_workflow.pco <- workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(rf_recipe.pco)
+
+```
+
+**Train the model**
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(345)
+rf_fit.d <- rf_workflow.d |> fit(train_data |> select(all_of(d_vars)))
+
+set.seed(345)
+rf_fit.pco <- rf_workflow.pco |> fit(train_data |> select(all_of(pco_vars)))
+```
+
+Some models (but not ranger) have a tidy() method that provides the summary results in a more useful format `rf_fit |> tidy()`.
+
+### 3. Evaluate model
+
+Cerda used the accuracy scores to evaluate model performance for multiclass classification problems
+
+**Predict test data **
+
+`augment()` has more details than `predict()`, but only works with probability forests
+
+```{r}
+rf_predict.d <- predict(rf_fit.d, test_data |> select(all_of(core_vars), starts_with("V")))
+rf_augment.d <- augment(rf_fit.d, test_data |> select(all_of(core_vars), starts_with("V")))
+
+rf_predict.pco <- predict(rf_fit.pco, test_data |> select(all_of(core_vars), starts_with("PCO")))
+rf_augment.pco <- augment(rf_fit.pco, test_data |> select(all_of(core_vars), starts_with("PCO")))
+```
+
+Accuracy from testing data - how did the models do overall?  
+`type = "prob"` only works when probability forest is set to TRUE  
+ROC is adjusted for multiclass accuracy (`hand-till` method).
+
+```{r}
+rf_testing_pred.d <- 
+  rf_predict.d |> 
+  bind_cols(predict(rf_fit.d, test_data |> select(all_of(core_vars), starts_with("V")), type = "prob")) |>  
+  bind_cols(test_data |> select(all_of(core_vars), starts_with("V")) |> select(census_region))
+
+bind_rows(rf_testing_pred.d |> accuracy(truth = census_region, .pred_class),
+          rf_testing_pred.d |> roc_auc(truth = census_region, ".pred_East North Central":".pred_West South Central"))
+
+rf_testing_pred.pco <- 
+  rf_predict.pco |> 
+  bind_cols(predict(rf_fit.pco, test_data |> select(all_of(core_vars), starts_with("PCO")), type = "prob")) |>  
+  bind_cols(test_data |> select(all_of(core_vars), starts_with("PCO")) |> select(census_region))
+
+bind_rows(rf_testing_pred.pco |> accuracy(truth = census_region, .pred_class),
+          rf_testing_pred.pco |> roc_auc(truth = census_region, ".pred_East North Central":".pred_West South Central"))
+
+```
+
+
+The accuracy is not great but is similar for both methods. In their paper, they had accuracy of about 0.68 for ranger.
+
+**Plot of roc curves for each class**
+
+`r colorize("There is an error at this next line:", "red")`  
+`r colorize("Returning more (or less) than 1 row per summarise() group was deprecated in dplyr 1.1.0. ℹ Please use reframe() instead", "blue")`  
+`r colorize("Q4. I'm not sure how to resolve this! Do you have any ideas please?", "red")`
+
+```{r, warning=FALSE}
+p1 <- rf_testing_pred.d %>%
+  roc_curve(census_region, ".pred_East North Central":".pred_West South Central") %>% 
+  ggplot(aes(1 - specificity, sensitivity, col = .level)) +
+  geom_abline(lty = 3, size = 0.5) +
+  geom_path(show.legend = FALSE, alpha = 0.6, size = 1.2) +
+  coord_equal() + theme_bw() +
+  facet_wrap(~.level, nrow=3) + ggtitle("Cerda method") +
+  theme(axis.text.x = element_text(angle = 90))  
+
+p2 <- rf_testing_pred.pco %>%
+  roc_curve(census_region, ".pred_East North Central":".pred_West South Central") %>% 
+  ggplot(aes(1 - specificity, sensitivity, col = .level)) +
+  geom_abline(lty = 3, size = 0.5) +
+  geom_path(show.legend = FALSE, alpha = 0.6, size = 1.2) +
+  coord_equal() + theme_bw() +
+  facet_wrap(~.level, nrow=3) + ggtitle("pco method") +
+  theme(axis.text.x = element_text(angle = 90))  
+
+gridExtra::grid.arrange(p1, p2, ncol=2)
+
+```
+
+### 3b. Cross validation
+
+**Accuracy via cross validation folds**
+
+- create resampling folds from the training set  
+
+`r colorize("Q5 - should I used stratified sampling?", "red")` - `r colorize("JM - probably, especially if the data is not balanced. Should do it for the train/test split earlier too!", "blue")`  
+`r colorize("Q6 - v=100 is not right is it - it isn't 100 random samples of the data but splitting the data into 100 different sets? So not what Cerda did. Change to v=10?", "red")` - `r colorize("JM - yup", "blue")`  
+
+
+```{r}
+set.seed(234)
+cv_folds.d <- vfold_cv(train_data |> select(all_of(core_vars), starts_with("V")), strata = census_region, v = 10)
+
+set.seed(234)
+cv_folds.pco <- vfold_cv(train_data |> select(all_of(core_vars), starts_with("PCO")), strata = census_region, v = 10)
+```
+
+**Fit the cross-validation sets**
+
+```{r}
+doParallel::registerDoParallel()
+contrl_preds <- control_resamples(save_pred = TRUE)
+
+rf_fit_cv.d <- fit_resamples(
+  rf_workflow.d,
+  resamples = cv_folds.d,
+  control = contrl_preds
+)
+
+rf_fit_cv.pco <- fit_resamples(
+  rf_workflow.pco,
+  resamples = cv_folds.pco,
+  control = contrl_preds
+)
+```
+
+**Evaluate the model**
+
+```{r}
+rf_fit_cv.d %>% collect_metrics()
+rf_fit_cv.pco %>% collect_metrics()
+```
+
+
+Since we saved the predictions with save_pred = TRUE we can compute other performance metrics. Notice that by default the positive predictive value (like accuracy) is macro-weighted for multiclass problems.
+
+```{r}
+rf_preds_cv.d <- rf_fit_cv.d %>% collect_predictions()
+
+bind_rows(rf_preds_cv.d %>% accuracy(census_region, .pred_class),
+          rf_preds_cv.d %>% roc_auc(truth=census_region, ".pred_East North Central":".pred_West South Central", estimator="hand_till"),
+          rf_preds_cv.d %>% ppv(census_region, .pred_class))
+
+
+rf_preds_cv.pco <- rf_fit_cv.pco %>% collect_predictions()
+
+bind_rows(rf_preds_cv.pco %>% accuracy(census_region, .pred_class),
+          rf_preds_cv.pco %>% roc_auc(truth=census_region, ".pred_East North Central":".pred_West South Central", estimator="hand_till"),
+          rf_preds_cv.pco %>% ppv(census_region, .pred_class))
+
+```
+
+**Confusion matrix** to see how the different classes did.
+
+```{r}
+(rf_preds_cv.d %>%
+  conf_mat(census_region, .pred_class))[[1]] %>%
+  as.data.frame() %>%
+  mutate(Truth = factor(Truth, levels=rev(levels(Truth)))) %>%
+  ggplot(aes(x=Prediction, y=Truth)) + 
+  geom_tile(aes(fill= Freq)) +
+  geom_text(aes(label = Freq)) +
+  scale_fill_gradient(low="#eeeeee", high="orange") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))  
+
+
+(rf_preds_cv.pco %>%
+  conf_mat(census_region, .pred_class))[[1]] %>%
+  as.data.frame() %>%
+  mutate(Truth = factor(Truth, levels=rev(levels(Truth)))) %>%
+  ggplot(aes(x=Prediction, y=Truth)) + 
+  geom_tile(aes(fill= Freq)) +
+  geom_text(aes(label = Freq)) +
+  scale_fill_gradient(low="#eeeeee", high="blue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))  
+
+```
+
+
+
+### 4. Testing data
+
+The function `last_fit()` fits one final time on the training data and evaluates on the testing data.  
+This is exactly the same as from individually training and testing with the same data split (as in 3. above).
+
+```{r}
+set.seed(345)
+final_fitted.d <- last_fit(rf_workflow.d, data_split)
+collect_metrics(final_fitted.d)  ## metrics evaluated on the *testing* data
+
+set.seed(345)
+final_fitted.pco <- last_fit(rf_workflow.pco, data_split)
+collect_metrics(final_fitted.pco)  ## metrics evaluated on the *testing* data
+```
+
+This object contains a fitted workflow that can be used for prediction.
+
+This is the chunk that needs to be repeated 100 times (I think) to replicate Cerda results. Set seed once at the start.
+
+```{r}
+set.seed(456)
+doParallel::registerDoParallel()
+accuracy.d_100 <- map_df(1:100,
+                      function(x) {
+                        #Split the data
+                        data_split <- initial_split(midwest, prop = 0.8)
+                        #Fit and test the model
+                        metrics.d <- last_fit(rf_workflow.d, data_split) |> collect_metrics()
+                        metrics.d[1,3]})
+
+set.seed(456)
+accuracy.pco_100 <- map_df(1:100,
+                      function(x) {
+                        #Split the data
+                        data_split <- initial_split(midwest, prop = 0.8)
+                        #Fit and test the model
+                        metrics.pco <- last_fit(rf_workflow.pco, data_split) |> collect_metrics()
+                        metrics.pco[1,3]})
+
+bind_rows(d=accuracy.d_100, pco=accuracy.pco_100, .id="method") |> 
+  rename(accuracy = .estimate) |> 
+  ggplot(aes(fill=method, x=accuracy, y=method)) + 
+           geom_boxplot(show.legend = FALSE) + 
+           labs(y = NULL,
+                x = "Accuracy",
+                title = "Classification accuracy of 100 random splits") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 13))
+```
+
+
+

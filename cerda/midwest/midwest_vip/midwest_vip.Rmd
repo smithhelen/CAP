@@ -1,0 +1,336 @@
+---
+title: "VIP of Midwest survey data"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 5)
+library(tidyverse)
+```
+
+```{r, echo=FALSE}
+colorize <- function(x, color) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color,
+      x)
+  } else x
+}
+```
+
+### `r colorize("Variable importance of Midwest survey data using different methods", "blue")`
+
+### 1. Load data
+
+Midwest survey data from Cerda et al 2018.  
+Survey to know if people self-identify as Midwesterners.  
+Sample size:  2,778.   
+Target variable (multiclass-clf): ‘Location (Census Region)’ (9 classes) - Cerda says 10 so perhaps includes missing, although they remove these rows anyway.
+Cerda selected categorical variable: ‘In your own words, what would you call the part of the country you live in now?’ (cardinality: 1,008) - again Cerda had extra one perhaps for missing.  
+Other explanatory variables: ‘Personally identification as a Midwesterner?’ (4 levels, ordinal), ‘Gender’ (2 levels), ‘Age’ (4 levels, ordinal), ‘Household Income’ (5 levels, ordinal), ‘Education’ (5 levels, ordinal), ‘Illinois (IL) in the Midwest?’, ‘IN?’, ‘IA?’, ‘KS?’, ‘MI?’, ‘MN?’, ‘MO?’, ‘NE?’, ‘ND?’, ‘OH?’, ‘SD?’, ‘WI?’, ‘AR?’, ‘CO?’, ‘KY?’, ‘OK?’, ‘PA?’, ’WV?’, ’MT?’, ‘WY?’ (each of these last variables are indicator variables, although an individual can belong to more than one).
+
+```{r}
+midwest_raw <- read.csv("midwest_survey.csv", header=T, na.strings=c(""," ","NA"))
+```
+
+**Data preprocessing**
+
+```{r}
+midwest_tidy <- midwest_raw |> 
+  # remove id because it contains rows that will be removed
+  select(-id) |> 
+  # fill in binary zeros
+  mutate(across(IL:WY, \(.) {replace(.,is.na(.),0)})) |> 
+  # remove rows with missing values for the target variable census_region
+  filter(!is.na(census_region)) |> 
+  # remove na from categorical_variable to avoid na in distance matrix
+  # need to change to string (rather than "") so can use tidymodels with probability forests
+  mutate(across(categorical_variable, \(.) {replace(.,is.na(.),"nan")})) |> 
+  # remove rows with missing values for explanatory variables other than the selected categorical variable
+  drop_na(where(is.character)) |> 
+  # transform all entries for the categorical variable to lower case
+  mutate(categorical_variable = tolower(categorical_variable)) |> 
+  # re-add id
+  rownames_to_column("id") |> 
+  # convert ordinal variables to ordered factors
+  mutate(education = factor(education, levels=c("Some college", "Less than high school degree", "High school degree", "Associate or bachelor degree", "Graduate degree"), ordered=TRUE, exclude = NULL), 
+         age = factor(age, levels=c("18-29", "30-44", "45-60", "> 60"), ordered=TRUE, exclude = NULL), 
+         household_income = factor(household_income, levels=c("$0 - $24,999", "$25,000 - $49,999", "$50,000 - $99,999", "$100,000 - $149,999", "$150,000+"), ordered=TRUE, exclude = NULL),
+         personal_id = factor(personal_id, levels=c("Not at all","Not much","Some","A lot"), ordered=TRUE, exclude = NULL)) |> 
+  # convert other variables to factors
+  mutate(across(!where(is.factor), factor))
+
+```
+
+**Calculate distance matrix** - Levenshtein distance "lv" ("hamming" only works when strings are the same length)
+
+The categorical variables are either binary or ordinal apart from 'categorical_variable'.
+Calculate a distance matrix for this variable only.
+
+```{r}
+d <- stringdist::stringdistmatrix(midwest_tidy$categorical_variable, midwest_tidy$categorical_variable, method = "lv", useNames = "names") 
+
+d.pco <- stringdist::stringdistmatrix(midwest_tidy$categorical_variable |> unique(), midwest_tidy$categorical_variable |> unique(), method = "lv", useNames = "strings") 
+
+```
+
+**Calculate PCO scores**
+
+Only required for 'categorical_variable'
+
+```{r, message=FALSE}
+source("../../methods/helpers.R")       # Functions used internally in the methods
+epsilon <- sqrt(.Machine$double.eps)
+mp <- 95
+A <- -0.5 * d.pco^2
+B <- dbl_center(A)
+eigen_B <- eigen_decomp(B, symmetric=TRUE)
+lambdas_B <- filter_eigenvalues(eigen_B$values, mp=mp) 
+Qo <- eigen_B$vectors
+Q <- sweep(Qo[, seq_len(length(lambdas_B)), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*") # Scale eigenvectors
+colnames(Q) <- paste0("PCO.",1:ncol(Q))
+PCO <- data.frame(Q) |> rownames_to_column("categorical_variable")
+
+```
+
+Merge the data with the encoded categorical variable into a giant dataset (2421 x 2482)!
+
+The different methods will use different encodings of the categorical_variable column :
+Cerda method will use the `r {midwest_tidy |> select(starts_with("V")) |> ncol()}` columns starting with "V", 
+PCO method will use the `r {midwest_tidy |> select(starts_with("PCO")) |> ncol()}` columns starting with "PCO" (which captures `r {mp}`% of the variation),
+
+Do the last step of the data-preprocessing:  
+-- standardize every column of the feature matrix to a unit variance (for d method not for pco method).
+
+```{r, message=FALSE}
+midwest <- midwest_tidy |> 
+  left_join(d |> as.data.frame() |> rownames_to_column("id") |> mutate(id=factor(id))) |> 
+  left_join(PCO |> mutate(categorical_variable=factor(categorical_variable))) |> 
+  #standardize every column of the feature matrix to a unit variance.
+  mutate(across(starts_with("V"), scale))
+
+midwest |> as_tibble()
+
+```
+
+
+### Build models
+
+No need to split the data for vip calculation
+
+```{r, message=FALSE}
+library(tidymodels)
+library(vip)
+
+```
+
+
+**Preprocess the data** (create a recipe)
+
+The different encoding methods  will use different columns of data. 
+Define the core variables which will be used by both methods.
+
+```{r}
+core_vars <- midwest |> select(!starts_with("V") & !starts_with("PCO") & -categorical_variable) |> colnames()
+```
+
+Tidymodels documentation recommend removing unused columns before the recipe step if they won't be used. This means a different recipe is required for the two encoding methods.
+Another (less preferred) option is to use `update_role()` and `update_role_requirements(..., bake=FALSE)`. 
+
+-- Specify any variables which are not predictors (update_role)  
+-- The variables are all either ordinal or already binary so one-hot encoding is not required
+-- Check for singular dummy columns (step_zv)  
+
+```{r}
+rf_recipe.d <- recipe(census_region ~ ., data = midwest |> select(all_of(core_vars), starts_with("V"))) |> 
+  update_role(id, respondent, new_role = "ID") |> 
+  step_zv(all_predictors()) 
+
+rf_recipe.pco <- recipe(census_region ~ ., data = midwest |> select(all_of(core_vars), starts_with("PCO"))) |> 
+  update_role(id, respondent, new_role = "ID") |> 
+  step_zv(all_predictors()) 
+```
+
+
+**Define the random forest model**
+
+We will update this for each method of vip
+
+```{r}
+rf_mod <- 
+  rand_forest(trees = 500)  |>  
+  set_engine("ranger", respect.unordered.factors = TRUE) |> 
+  set_mode("classification")
+
+```
+
+
+**Define workflow** (bundle the model and recipe)
+
+```{r}
+rf_workflow.d <- workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(rf_recipe.d)
+
+rf_workflow.pco <- workflow() |> 
+  add_model(rf_mod) |> 
+  add_recipe(rf_recipe.pco)
+```
+
+
+### Variable Importance
+
+**`r colorize("1. probability tree with ranger:permutation method", "blue")`**
+
+Update model
+
+```{r}
+vip1_rf_mod <- rf_mod |>  set_engine("ranger", respect.unordered.factors = TRUE, importance = "permutation")
+vip1_rf_workflow.d <- rf_workflow.d |> update_model(vip1_rf_mod)
+vip1_rf_workflow.pco <- rf_workflow.pco |> update_model(vip1_rf_mod)
+```
+
+Fit models for the different encoding methods (d vs pco)
+
+```{r}
+doParallel::registerDoParallel()
+vip1_rf_fit.d <- vip1_rf_workflow.d |> fit(midwest |> select(all_of(core_vars), starts_with("V")))
+vip1_rf_fit.pco <- vip1_rf_workflow.pco |> fit(midwest |> select(all_of(core_vars), starts_with("PCO")))
+```
+
+Extract parsnip, run `vi()`, and plot
+
+```{r}
+vip1.d <- vip1_rf_fit.d |> extract_fit_parsnip()
+#vip1.d |> vi()
+p1 <- vip1.d |> 
+  vip(num_features = 30, geom = "point", aesthetics = list(color = "red")) + ggtitle("Cerda : permutation vip method")
+
+vip1.pco <- vip1_rf_fit.pco |> extract_fit_parsnip() 
+#vip1.pco |> vi()
+p2 <- vip1.pco |> 
+  vip(num_features = 30, geom = "point", aesthetics = list(color = "blue")) + ggtitle("PCO : permutation vip method")
+```
+
+**`r colorize("2. probability tree with ranger:impurity_corrected method", "blue")`**
+
+Update model
+
+```{r}
+vip2_rf_mod <- rf_mod |> set_engine("ranger", respect.unordered.factors = TRUE, importance = "impurity_corrected")
+vip2_rf_workflow.d <- rf_workflow.d |> update_model(vip2_rf_mod)
+vip2_rf_workflow.pco <- rf_workflow.pco |> update_model(vip2_rf_mod)
+```
+
+Fit models
+
+```{r}
+vip2_rf_fit.d <- vip2_rf_workflow.d |> fit(midwest |> select(all_of(core_vars), starts_with("V")))
+vip2_rf_fit.pco <- vip2_rf_workflow.pco |> fit(midwest |> select(all_of(core_vars), starts_with("PCO")))
+```
+
+Extract parsnip and run `vi()` and plot
+
+```{r}
+vip2.d <- vip2_rf_fit.d |> extract_fit_parsnip()
+p3 <- vip2.d |> 
+  vip(num_features = 30, geom = "point", aesthetics = list(color = "red")) + ggtitle("Cerda : impurity_corrected vip method")
+
+vip2.pco <- vip2_rf_fit.pco |> extract_fit_parsnip() 
+p4 <- vip2.pco |> 
+  vip(num_features = 30, geom = "point", aesthetics = list(color = "blue")) + ggtitle("PCO : impurity_corrected vip method")
+
+```
+
+**`r colorize("3. classification tree with vip importance", "blue")`**
+
+Set `probability = FALSE` to get classification tree not probability tree.
+
+Update model
+
+```{r}
+vip3_rf_mod <- rf_mod |> set_engine("ranger", respect.unordered.factors = TRUE, probability = FALSE)
+vip3_rf_workflow.d <- rf_workflow.d |> update_model(vip3_rf_mod)
+vip3_rf_workflow.pco <- rf_workflow.pco |> update_model(vip3_rf_mod)
+```
+
+Fit model
+
+```{r}
+vip3_rf_fit.d <- vip3_rf_workflow.d |> fit(midwest |> select(all_of(core_vars), starts_with("V")))
+vip3_rf_fit.pco <- vip3_rf_workflow.pco |> fit(midwest |> select(all_of(core_vars), starts_with("PCO")))
+```
+
+Run `vi()` using "permute" , repeat nsim times, and plot  
+Define *pfun* which pulls out the predicted classes `.pred_Class`
+
+```{r}
+pfun <- function(object, newdata) {
+  predict(object, new_data = newdata, type = "class")$.pred_class
+}
+
+p5 <- vip3_rf_fit.d |> 
+  vip(method = "permute", target = "census_region", metric = "accuracy", 
+      pred_wrapper = pfun, train = midwest |> select(all_of(core_vars), starts_with("V")),
+      nsim = 10, geom = "boxplot", all_permutations = TRUE, 
+      mapping = aes(fill = !!sym("Variable"))) + 
+  ggtitle("Cerda : vip permute (classification forest) method")
+
+p6 <- vip3_rf_fit.pco |> 
+  vip(method = "permute", target = "census_region", metric = "accuracy", 
+      pred_wrapper = pfun, train = midwest |> select(all_of(core_vars), starts_with("PCO")),
+      nsim = 10, geom = "boxplot", all_permutations = TRUE, 
+      mapping = aes(fill = !!sym("Variable"))) + 
+  ggtitle("PCO : vip permute (classification forest) method")
+```
+
+```{r, echo=FALSE}
+grid.arrange(p1, p2, ncol=2)
+grid.arrange(p3, p4, ncol=2)
+grid.arrange(p5, p6, ncol=2)
+```
+
+Can also repeat the variable importance calculations `nsim` times.  
+
+**`r colorize("1b. probability tree with ranger:permutation method", "blue")`**
+
+```{r, message=FALSE}
+library(tidytext)
+set.seed(234)
+
+doParallel::registerDoParallel()
+
+vi.d_100 <- map(1:100,
+                function(x) vip1_rf_workflow.d |> fit(midwest |> select(all_of(core_vars), starts_with("V"))) |> extract_fit_parsnip() |> vi()) |> 
+            reduce(rbind)
+vi.pco_100 <- map(1:100,
+                function(x) vip1_rf_workflow.pco |> fit(midwest |> select(all_of(core_vars), starts_with("PCO"))) |> extract_fit_parsnip() |> vi()) |> 
+            reduce(rbind)
+
+pdat <- bind_rows(d=vi.d_100, pco=vi.pco_100, .id = "method")
+vars <- pdat |> group_by(method, Variable) |> 
+  summarise(mean = mean(Importance)) |> 
+  slice_max(mean, n=15) |> 
+  pull(Variable) |> unique()
+
+pdat |> filter(Variable %in% vars) |> 
+  mutate(Variable2 = reorder_within(Variable, Importance, method)) |> 
+  ggplot(aes(x=Variable2, y=Importance, fill = Variable)) +
+  geom_boxplot(show.legend = FALSE) +
+  facet_wrap(~method, scales = "free_y") +
+    coord_flip() +
+    scale_x_reordered() +
+    labs(y = "Importance (change in accuracy following permutation)",
+         x = NULL,
+         title = "Variable importance for Midwest Census") +
+  theme_bw()
+
+```
+
+
+
+
