@@ -1,13 +1,18 @@
 #### Prepare test data and training data for ca_unbiased method ####
 
-# Function to map from variable levels to ranks.
+# Function to map from variable levels to scores
 epsilon <- sqrt(.Machine$double.eps)
 
 # Output is both the score information for the variable (i.e. a vector of the same length as the input vector) and
 # the level mapping data.frame (mapping from var_level to score)
 factor_to_ca0_score <- function(var, class, k) {
   var_levels <- droplevels(var)
-  if(nlevels(var_levels) < 2){return(NULL)}  ## ?? check this ??
+  if(nlevels(var_levels) < 2){
+    # if we only have one var_level we can't do anything - this is not right, it still has RANK in it
+    return(list(output = rep(1, times=length(var)),
+                extra = list(var_levels=levels(var_levels), dim = 1, suffix=NULL,
+                             score = data.frame(Var_Level = c(levels(var_levels), "new"), Rank = c(1, 2)))))
+      }  ## ?? check this ??
   ct <- table(Var_Level=var_levels, Class=class)
   if(is.null(k)){k <- ncol(ct)-1}
   # add zero row - can't add zeros to ct as P will complain. So add 1/num.classes to P (equal probabilities across classes)
@@ -16,7 +21,7 @@ factor_to_ca0_score <- function(var, class, k) {
   P <- rbind(ct/rowSums(ct),new)
   S <- cov.wt(P, wt = c(rowSums(ct),0))$cov
   eigen_S <- eigen_decomp(S, symmetric=TRUE) ## PCA of weighted covariance matrix of class probabilites
-  # Restrict to a maximum of eigenvectors set by "k" (the number of axes) (default is 2 but should maybe be ncol(ct)-1 ???)
+  # Restrict to a maximum of eigenvectors set by "k" (the number of axes) (default is NULL = ncol(ct)-1)
   nlambdas <- min(sum(eigen_S$values > epsilon), k)
   # principal components
   pc <- eigen_S$vectors
@@ -28,12 +33,12 @@ factor_to_ca0_score <- function(var, class, k) {
 }
 
 # iterate over the variable columns and grab the output as a new data.frame to send into ca, and store the absent level stuff for later
-prepare_training_ca0 <- function(data, var_cols, class, k=2, residualised=NULL) {
+prepare_training_ca0 <- function(data, var_cols, class, k=NULL, residualised=NULL) {
   # pull out our var_cols and class
   var_cols <- data |> select(all_of(var_cols))
   classes   <- data |> pull(all_of(class))
   # iterate over the var columns, and convert
-  prepped <- map(var_cols, factor_to_ca0_score, class = classes, k = k) |> compact()
+  prepped <- map(var_cols, factor_to_ca0_score, class = classes, k = k)
   output <- map(prepped, "output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
