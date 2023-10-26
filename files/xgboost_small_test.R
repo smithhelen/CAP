@@ -5,16 +5,17 @@
 source("methods/libs_fns.R")
 library(tidymodels)
 library(finetune)
-#library(xgboost)i8
+#library(xgboost)
 #library(vip)
 
 # define functions #########################################################################################################
 prepare_training_pco_m <- function(data, vars, class, d, m.list, mp, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data, all_of(vars))
+  var_cols <- dplyr::select(data, all_of(vars)) |> select(all_of(names(m.list)))
   classes   <- data |> pull(class)
+  d.list <- d[names(m.list)]
   # iterate over the var columns and distance matrices, and convert
-  prepped <- pmap(list(var_cols, d, m.list), factor_to_pco_score, mp) |> compact() # removes empties
+  prepped <- pmap(list(var_cols, d.list, m.list), factor_to_pco_score, mp) |> compact() # removes empties
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()),
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
@@ -28,10 +29,11 @@ prepare_training_pco_m <- function(data, vars, class, d, m.list, mp, residualise
 
 prepare_training_cap_m <- function(data, vars, class, d, k, m.list, mp, c, residualised=NULL) {
   # pull out our var_cols and class
-  var_cols <- dplyr::select(data,all_of(vars))
+  var_cols <- dplyr::select(data,all_of(vars)) |> select(all_of(names(m.list)))
   classes   <- data |> pull(class)
+  d.list <- d[names(m.list)]
   # iterate over the var columns and distance matrices, and convert
-  prepped <- pmap(list(var_cols, d, m.list), factor_to_CAP_score, class = classes, k, mp, c) |> compact() # removes empties
+  prepped <- pmap(list(var_cols, d.list, m.list), factor_to_CAP_score, class = classes, k, mp, c) |> compact() # removes empties
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
@@ -103,40 +105,82 @@ cgMLST_dat <- cgMLST |>
   mutate(Source = fct_recode(as.factor(Source), Cattle="Beef", Chicken="Poultry")) |> 
   filter(Source != "Human") |> droplevels()
 
+# all data
+# dat <- cgMLST_dat
+# dat.Ph <- cgMLST_dat |> select(!all_of(zeros)) |> droplevels()
+# d <- list_of_distance_matrices
+# d.8gram <- list_of_8grams
+# d.Ph <- list_of_distance_matrices_Phandango
+
+# jejuni only
+details <- read.csv("../CAP_data/data/SACNZ_referencelist.csv")
+dat <- cgMLST_dat |> left_join(details |> select(LabID, Species), by="LabID") |> filter(Species == "Jejuni") |> select(-c(Species, CAMP1122)) |> droplevels()
+dat.Ph <- cgMLST_dat |> left_join(details |> select(LabID, Species), by="LabID") |> filter(Species == "Jejuni") |> select(-Species) |> select(!all_of(zeros)) |> droplevels()
+d <- list_of_distance_matrices[colnames(dat |> select(starts_with("CAMP")))]
+d.8gram <- list_of_8grams[colnames(dat |> select(starts_with("CAMP")))]
+d.Ph <- list_of_distance_matrices_Phandango[colnames(dat.Ph |> select(starts_with("CAMP")))]
+
 # subset for testing
-# dat <- cgMLST_dat |> select(c(LabID, Source, sample(2:1344, size=30)))
-# dat.Ph <- cgMLST_dat |> select(!any_of(zeros)) |> select(c(LabID, Source, sample(2:1344, size=30)))
+# dat <- cgMLST_dat |> select(c(LabID, Source, sample(2:1344, size=5))) |> droplevels()
+# dat.Ph <- cgMLST_dat |> select(!any_of(zeros)) |> select(c(LabID, Source, sample(2:1344, size=5))) |> droplevels()
 # d <- list_of_distance_matrices[colnames(dat |> select(starts_with("CAMP")))]
+# d.6gram <- list_of_6grams[colnames(dat |> select(starts_with("CAMP")))]
 # d.8gram <- list_of_8grams[colnames(dat |> select(starts_with("CAMP")))]
+# d.10gram <- list_of_10grams[colnames(dat |> select(starts_with("CAMP")))]
+# d.12gram <- list_of_12grams[colnames(dat |> select(starts_with("CAMP")))]
 # d.Ph <- list_of_distance_matrices_Phandango[colnames(dat.Ph |> select(starts_with("CAMP")))]
 
-# all data
-dat <- cgMLST_dat
-dat.Ph <- cgMLST_dat |> select(!all_of(zeros))
-d <- list_of_distance_matrices
-d.8gram <- list_of_8grams
-d.Ph <- list_of_distance_matrices_Phandango
+# seeds
+runif(5,1,1000) |> round(0)
 
 # split into folds #########################################################################################################
-set.seed(3473)
-folds <- vfold_cv(dat, strata = Source)
-folds.Ph <- vfold_cv(dat.Ph, strata = Source)
+set.seed(483)
+#nfolds=10
+nfolds=5
+folds <- vfold_cv(dat, strata = Source, v=nfolds)
+
+# pull out row indices
+in.id <- list()
+for(i in 1:nfolds){
+  in.id[[i]] <- folds$splits[[i]]$in_id
+}
+
+if(0){
+  set.seed(483)
+  folds.2 <- vfold_cv(dat, strata = Source, v=nfolds)
+  # show they are different
+  all.equal(analysis(folds$splits[[1]]), analysis(folds.2$splits[[1]]))
+  for(i in 1:nfolds){
+    folds.2$splits[[i]]$in_id <- in.id[[i]]
+  }
+  # check they are now the same
+  all.equal(analysis(folds$splits[[1]]), analysis(folds.2$splits[[1]]))
+}
+
+folds.Ph <- vfold_cv(dat.Ph, strata = Source, v=nfolds)
+# change indices
+for(i in 1:nfolds){
+  folds.Ph$splits[[i]]$in_id <- in.id[[i]]
+}
 
 # score each fold #########################################################################################################
 ca0_folds <- folds
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- ca0_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="ca0", d=NULL)
   ca0_folds$splits[[i]]$data <- prepped.dat$dat
 }
 
-if((ca0_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- ca0_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- ca0_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
-    ca0_folds$splits[[i]]$data <- ca0_folds$splits[[i]]$data |> select(all_of(cols))
-  }
+#find common variables
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- ca0_folds$splits[[i]]$data |> colnames()
 }
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
+  ca0_folds$splits[[i]]$data <- ca0_folds$splits[[i]]$data |> select(all_of(cols))
+}
+
 
 pco_folds <- folds
 # find the maximum number of pco axes for each gene
@@ -147,116 +191,124 @@ names(m.null) <- names(d)
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d, m.null, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d, m.null, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d, m.list=m.95, mp=NULL)
   pco_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
-    pco_folds$splits[[i]]$data <- pco_folds$splits[[i]]$data |> select(all_of(cols))
-  }
-}
 
-cap_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d)
-  cap_folds$splits[[i]]$data <- prepped.dat$dat
+#find common variables
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_folds$splits[[i]]$data |> colnames()
 }
-# cap_folds <- folds # m.95
-# for(i in 1:10){
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
+  pco_folds$splits[[i]]$data <- pco_folds$splits[[i]]$data |> select(all_of(cols))
+  }
+
+# cap_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d)
 #   cap_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_folds <- folds # m.95 use for jejuni
+for(i in 1:nfolds){
+  x <- cap_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d)
+  cap_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_folds$splits |> map(function(x) x$data |> colnames()) 
-if((cap_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
-    cap_folds$splits[[i]]$data <- cap_folds$splits[[i]]$data |> select(all_of(cols))
-  }
+#find common variables
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_folds$splits[[i]]$data |> colnames()
 }
-
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
+  cap_folds$splits[[i]]$data <- cap_folds$splits[[i]]$data |> select(all_of(cols))
+}
 
 pco_8gram_folds <- folds
 # find the maximum number of pco axes for each gene
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.8gram, m.null, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.8gram, m.null, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d.8gram, m.list=m.95, mp=NULL)
   pco_8gram_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_8gram_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_8gram_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_8gram_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     pco_8gram_folds$splits[[i]]$data <- pco_8gram_folds$splits[[i]]$data |> select(all_of(cols))
-  }
 }
 
 
-cap_8gram_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_8gram_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.8gram, k=2)
-  cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
-}
-# cap_8gram_folds <- folds # m.95
-# for(i in 1:10){
+
+# cap_8gram_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_8gram_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.8gram)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.8gram, k=2)
 #   cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_8gram_folds <- folds # m.95 use for jejuni
+for(i in 1:nfolds){
+  x <- cap_8gram_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.8gram)
+  cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
 #cap_8gram_folds$splits |> map(function(x) x$data |> colnames()) 
-if((cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_8gram_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
-    cap_8gram_folds$splits[[i]]$data <- cap_8gram_folds$splits[[i]]$data |> select(all_of(cols))
-  }
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_8gram_folds$splits[[i]]$data |> colnames()
 }
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
+  cap_8gram_folds$splits[[i]]$data <- cap_8gram_folds$splits[[i]]$data |> select(all_of(cols))
+}
+
 
 
 pco_Phand_folds <- folds.Ph
@@ -266,59 +318,62 @@ names(m.null.Ph) <- names(d.Ph)
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.Ph, m.null.Ph, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 length(m.95)
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.Ph, m.null.Ph, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d.Ph, m.list=m.95, mp=NULL)
   pco_Phand_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_Phand_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_Phand_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_Phand_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     pco_Phand_folds$splits[[i]]$data <- pco_Phand_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
 
 
-cap_Phand_folds <- folds.Ph # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_Phand_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.Ph, k=2)
-  cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
-}
-# cap_Phand_folds <- folds.Ph # m.95
-# for(i in 1:10){
+# cap_Phand_folds <- folds.Ph # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_Phand_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.Ph)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.Ph, k=2)
 #   cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_Phand_folds <- folds.Ph # m.95 use for jejuni
+for(i in 1:nfolds){
+  x <- cap_Phand_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.Ph)
+  cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
 #cap_Phand_folds$splits |> map(function(x) x$data |> colnames()) 
-if((cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_Phand_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
-    cap_Phand_folds$splits[[i]]$data <- cap_Phand_folds$splits[[i]]$data |> select(all_of(cols))
-  }
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_Phand_folds$splits[[i]]$data |> colnames()
 }
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
+    cap_Phand_folds$splits[[i]]$data <- cap_Phand_folds$splits[[i]]$data |> select(all_of(cols))
+}
+
 
 
 
@@ -330,7 +385,7 @@ xg_spec <-
              mtry = tune(), #default 
              #tree_depth = tune(), #default 6           
              #learn_rate = 0.01
-             learn_rate = 0.1) |>
+             learn_rate = tune()) |>
   set_engine("xgboost") |> 
   set_mode("classification")
 
@@ -365,7 +420,7 @@ xg_workflow.cap.Ph <- workflow(xg_recipe.cap.Ph, xg_spec)
 
 # tune xgboost parameters ##############################################################################################################
 doParallel::registerDoParallel()
-set.seed(3159)
+set.seed(568)
 xg_resamples.ca0 <- tune_race_anova(
   xg_workflow.ca0,
   resamples = ca0_folds,
@@ -421,52 +476,49 @@ xg_resamples.cap.Ph <- tune_race_anova(
 #collect_metrics(xg_resamples.ca0)
 #plot_race(xg_resamples.ca0)
 #show_best(xg_resamples.ca0, "accuracy")
+
 best_ca0 <- select_best(xg_resamples.ca0, "accuracy")
-
-#collect_metrics(xg_resamples.pco)
-#plot_race(xg_resamples.pco)
-#show_best(xg_resamples.pco, "accuracy")
 best_pco <- select_best(xg_resamples.pco, "accuracy")
-
-#collect_metrics(xg_resamples.cap)
-#plot_race(xg_resamples.cap)
-#show_best(xg_resamples.cap, "accuracy")
 best_cap <- select_best(xg_resamples.cap, "accuracy")
-
-# collect_metrics(xg_resamples.pco.8g)
-# plot_race(xg_resamples.pco.8g)
-# show_best(xg_resamples.pco.8g, "accuracy")
 best_pco.8g <- select_best(xg_resamples.pco.8g, "accuracy")
-
-# collect_metrics(xg_resamples.cap.8g)
-# plot_race(xg_resamples.cap.8g)
-# show_best(xg_resamples.cap.8g, "accuracy")
 best_cap.8g <- select_best(xg_resamples.cap.8g, "accuracy")
-
 best_pco.Ph <- select_best(xg_resamples.pco.Ph, "accuracy")
 best_cap.Ph <- select_best(xg_resamples.cap.Ph, "accuracy")
 
 
 # split into folds ##############################################################################################################
-set.seed(6795)
-folds <- vfold_cv(dat, strata = Source)
-folds.Ph <- vfold_cv(dat.Ph, strata = Source)
+set.seed(458)
+folds <- vfold_cv(dat, strata = Source, v=nfolds)
+
+# pull out row indices
+in.id <- list()
+for(i in 1:nfolds){
+  in.id[[i]] <- folds$splits[[i]]$in_id
+}
+
+folds.Ph <- vfold_cv(dat.Ph, strata = Source, v=nfolds)
+# change indices
+for(i in 1:nfolds){
+  folds.Ph$splits[[i]]$in_id <- in.id[[i]]
+}
 
 # score each fold ##############################################################################################################
 ca0_folds <- folds
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- ca0_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="ca0", d=NULL)
   ca0_folds$splits[[i]]$data <- prepped.dat$dat
 }
 
-if((ca0_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- ca0_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- ca0_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- ca0_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     ca0_folds$splits[[i]]$data <- ca0_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
+
 
 
 pco_folds <- folds
@@ -478,58 +530,62 @@ names(m.null) <- names(d)
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d, m.null, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d, m.null, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d, m.list=m.95, mp=NULL)
   pco_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     pco_folds$splits[[i]]$data <- pco_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
 
 
-cap_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d)
-  cap_folds$splits[[i]]$data <- prepped.dat$dat
-}
-# cap_folds <- folds # m.95
-# for(i in 1:10){
+
+# cap_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d)
 #   cap_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_folds <- folds # m.95 for jejuni
+for(i in 1:nfolds){
+  x <- cap_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d)
+  cap_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_folds$splits |> map(function(x) x$data |> colnames()) 
-if((cap_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     cap_folds$splits[[i]]$data <- cap_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
+
 
 
 pco_8gram_folds <- folds
@@ -537,58 +593,60 @@ pco_8gram_folds <- folds
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.8gram, m.null, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.8gram, m.null, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_8gram_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d.8gram, m.list=m.95, mp=NULL)
   pco_8gram_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_8gram_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_8gram_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_8gram_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_8gram_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     pco_8gram_folds$splits[[i]]$data <- pco_8gram_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
 
-cap_8gram_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_8gram_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.8gram)
-  cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
-}
-# cap_8gram_folds <- folds # m.95
-# for(i in 1:10){
+
+# cap_8gram_folds <- folds # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_8gram_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.8gram)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.8gram)
 #   cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_8gram_folds <- folds # m.95 for jejuni
+for(i in 1:nfolds){
+  x <- cap_8gram_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.8gram)
+  cap_8gram_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_8gram_folds$splits |> map(function(x) x$data |> colnames()) 
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_8gram_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
 cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
-cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) 
-if((cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_8gram_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_8gram_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+  for(i in 1:nfolds){
     cap_8gram_folds$splits[[i]]$data <- cap_8gram_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
 
 
 
@@ -598,57 +656,61 @@ pco_Phand_folds <- folds.Ph
 
 # create empty list for mp=95%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.Ph, m.null.Ph, mp=95)$m
 }
-m.95 <- map(m, unlist) |> bind_rows() |> map(max)
+m.95 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 # create empty list for mp=99%
 m <- list()
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   m[[i]] <- score_fn_m(x, method="pco", d=d.Ph, m.null.Ph, mp=99)$m
 }
-m.99 <- map(m, unlist) |> bind_rows() |> map(max)
+m.99 <- map(m, unlist) |> bind_rows() |> map(max, na.rm=TRUE)
 
 # now use m (number of axes) rather than mp (prop var)
-for(i in 1:10){
+for(i in 1:nfolds){
   x <- pco_Phand_folds$splits[[i]]
   prepped.dat <- score_fn_m(x, method="pco", d=d.Ph, m.list=m.95, mp=NULL)
   pco_Phand_folds$splits[[i]]$data <- prepped.dat$dat
 }
 #pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) 
 #pco_Phand_folds$splits |> map(function(x) x$data |> colnames()) 
-if((pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- pco_Phand_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- pco_Phand_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- pco_Phand_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     pco_Phand_folds$splits[[i]]$data <- pco_Phand_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
 
 
-cap_Phand_folds <- folds.Ph # use m.99 as m.95 has a lot of single dimension variables
-for(i in 1:10){
-  x <- cap_Phand_folds$splits[[i]]
-  prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.Ph)
-  cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
-}
-# cap_Phand_folds <- folds.Ph # m.95
-# for(i in 1:10){
+# 
+# cap_Phand_folds <- folds.Ph # use m.99 as m.95 has a lot of single dimension variables
+# for(i in 1:nfolds){
 #   x <- cap_Phand_folds$splits[[i]]
-#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.Ph)
+#   prepped.dat <- score_fn_m(x, method="cap", m.list=m.99, mp=NULL, d=d.Ph)
 #   cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
 # }
+cap_Phand_folds <- folds.Ph # m.95 for jejuni
+for(i in 1:nfolds){
+  x <- cap_Phand_folds$splits[[i]]
+  prepped.dat <- score_fn_m(x, method="cap", m.list=m.95, mp=NULL, d=d.Ph)
+  cap_Phand_folds$splits[[i]]$data <- prepped.dat$dat
+}
 #cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) 
 #cap_Phand_folds$splits |> map(function(x) x$data |> colnames()) 
-if((cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) )|> unlist() |> table() |> as.data.frame() |> ncol() != 1){
-  f <- cap_Phand_folds$splits |> map(function(x) x$data |> ncol()) |> which.min()
-  cols <- cap_Phand_folds$splits[[f]]$data |> colnames()
-  for(i in 1:10){
+cols <- vector(mode="list", length = nfolds)
+for(i in 1:nfolds){
+  cols[[i]] <- cap_Phand_folds$splits[[i]]$data |> colnames()
+}
+cols <- reduce(cols, intersect)
+for(i in 1:nfolds){
     cap_Phand_folds$splits[[i]]$data <- cap_Phand_folds$splits[[i]]$data |> select(all_of(cols))
   }
-}
+
 
 
 # update model specs ############################################################################################################
@@ -699,7 +761,7 @@ xg_workflows <- list(ca0=xg_final_workflow.ca0,
 #save(xg_workflows, file = "xgb_workflows_SACNZ.Rdata")
 
 # run xgboost resamples ##############################################################################################################
-set.seed(21673)
+set.seed(659)
 xg_rs.ca0 <- fit_resamples(
   xg_final_workflow.ca0,
   resamples = ca0_folds,
@@ -795,7 +857,7 @@ rf_workflow.cap.Ph <- workflow(rf_recipe.cap.Ph, rf_spec)
 
 # run rf resamples ##############################################################################################################
 
-set.seed(23789)
+set.seed(847)
 rf_rs.ca0 <- fit_resamples(
   rf_workflow.ca0,
   resamples = ca0_folds,
@@ -863,10 +925,16 @@ all_metrics <- list(ca0=list(rf=rf_rs.ca0, xg=xg_rs.ca0),
                     pco_Ph=list(rf=rf_rs.pco.Ph, xg=xg_rs.pco.Ph),
                     cap_Ph=list(rf=rf_rs.cap.Ph,xg=xg_rs.cap.Ph)
                     )
-#save(all_metrics, file = "all_metrics_SACNZ.Rdata")
+save(all_metrics, file = "all_metrics_SACNZ_5folds_jejuni_v2.Rdata")
+#load("all_metrics_SACNZ_5folds_v1.Rdata")
+#load("all_metrics_SACNZ_5folds_v2.Rdata")
+#load("all_metrics_SACNZ_v1.Rdata")
+#load("all_metrics_SACNZ_v2.Rdata")
+#load("all_metrics_SACNZ_v3.Rdata")
 
 
 # plot ##############################################################################################################
+nfolds = length(all_metrics$cap$rf$splits)
 
 p <- all_metrics |> map_df(function(x) x |> map_df(collect_metrics, .id = "model"), .id = "method" ) |> 
   filter(.metric == "accuracy") |> 
@@ -879,24 +947,78 @@ p <- all_metrics |> map_df(function(x) x |> map_df(collect_metrics, .id = "model
   select(method2, method, model, mean, std_err, dist)
 
 p |> 
-  ggplot() +
-  geom_point(aes(x=method, y=mean, col=model, shape=dist, group=model), size=3, stroke=1.5, position = position_dodge(0.3)) +
-  scale_shape_identity(guide = "legend", breaks=c(8,15,17,19), labels=c("none","8grams","Phandango","Hamming")) +
-  scale_colour_manual(values = c("#115896", "#BA2F00"), labels=c("Random Forest", "xg boost")) +
-  guides(col = guide_legend("Encoding method"),
-         shape = guide_legend("Distance measure")) +
-  labs(x = "Method of encoding", y = "Classification success", title = "xgboost and rf results, SACNZ sample data, 10 cv folds") +
-  theme_bw() 
-
-p |> 
   ggplot(aes(x=method, y=mean)) +
   geom_errorbar(aes(col=method, group=as.factor(dist), ymin=mean-std_err, ymax=mean+std_err), width=0.2, position = position_dodge(0.5)) +
   geom_point(aes(col=method, shape=dist, group=as.factor(dist)), size=3, stroke=1.5, position = position_dodge(0.5)) +
-  scale_shape_identity(guide = "legend", breaks=c(15,17,19), labels=c("8grams","Phandango","Hamming")) +
+  #ylim(0.55,0.9) +
+  scale_shape_identity(guide = "legend", breaks=c(1, 15,17,19), labels=c("None","8grams","Phandango","Hamming")) +
   scale_colour_manual(values = c("#115896", "#4C4C53", "#BA2F00")) +
-  guides(col = guide_legend("Distance measure"),
+  guides(col = guide_legend("Method of encoding"),
          shape = guide_legend("Distance measure")) +
-  labs(x = "Method of encoding", y = "Classification success", title = "xgboost and rf results, SACNZ sample data, 10 cv folds") +
+  labs(x = "Method of encoding", y = "Classification success", title = paste0("xgboost and rf results, SACNZ sample data, ", nfolds ," cv folds")) +
+  theme_bw() +
+  facet_wrap(~model, labeller = labeller(model=c("rf" = "Random Forest", "xg" = "xgboost")))
+
+# by fold
+p2 <- bind_rows(
+  rf = all_metrics |> map_df(function(x) x$rf |> pull(.metrics) |> map_df(function(x) x |> filter(.metric=="accuracy") |> select(.estimate), .id="fold"), .id = "method" ),
+  xg = all_metrics |> map_df(function(x) x$xg |> pull(.metrics) |> map_df(function(x) x |> filter(.metric=="accuracy") |> select(.estimate), .id="fold"), .id = "method" ), .id="model") |> 
+  mutate(dist = case_when(method |> str_detect("8g") ~ 15,
+                          method |> str_detect("ca0") ~ 1,
+                          method |> str_detect("Ph") ~ 17,
+                          TRUE ~ 19),
+         method2 = factor(method),
+         method = factor(str_sub(method2, 1,3), ordered=TRUE, levels=c("ca0", "pco", "cap")))
+
+p2 |> 
+  ggplot(aes(x=method, y=.estimate)) +
+  geom_point(aes(col=method, shape=dist, group=as.factor(dist)), size=3, stroke=1.5, position = position_dodge(0.5)) +
+  scale_shape_identity(guide = "legend", breaks=c(1, 15,17,19), labels=c("None","8grams","Phandango","Hamming")) +
+  stat_summary(aes(group=as.factor(dist)), col="black", geom = "point", fun = "mean", size = 4, stroke=1.5, shape = 4, position = position_dodge(0.5), show.legend = FALSE) +
+  ylim(0.,1.0) +
+  scale_colour_manual(values = c("#086abf", "#6c7a87", "#da400b")) +
+  guides(col = guide_legend("Method of encoding"),
+         shape = guide_legend("Distance measure")) +
+  labs(x = "Method of encoding", y = "Classification success", title = paste0("xgboost and rf results, SACNZ sample data, ", nfolds, " cv folds")) +
+  theme_bw() +
+  facet_wrap(~model, labeller = labeller(model=c("rf" = "Random Forest", "xg" = "xgboost")))
+
+p2 |> 
+  ggplot(aes(x=method, y=.estimate)) +
+  geom_text(aes(label=fold, colour=as.factor(dist), group=as.factor(dist)), size=4, position = position_dodge(0.5))  + 
+  geom_point(aes(colour=as.factor(dist)), alpha = 0, size=3) + 
+  stat_summary(aes(group=as.factor(dist)), col="black", geom = "point", fun = "mean", size = 4, stroke=1.5, shape = 4, position = position_dodge(0.5), show.legend = FALSE) +
+ # ylim(0.50,0.90) +
+  scale_colour_manual(values = c("#086abf", "#6c7a87", "#da400b", "#3da572"), guide = "legend", labels=c("None","8grams","Phandango","Hamming")) +
+  guides(col = guide_legend(title="Distance measure", override.aes=aes(label="", alpha=1))) +
+  labs(x = "Method of encoding", y = "Classification success", title = paste0("xgboost and rf results, SACNZ sample data, ", nfolds, " cv folds")) +
+  theme_bw() +
+  facet_wrap(~model, labeller = labeller(model=c("rf" = "Random Forest", "xg" = "xgboost")))
+
+
+# by class
+p3 <- bind_rows(
+  rf = all_metrics |> map_df(function(x) x$rf$.predictions |> reduce(rbind) |> select(.pred_class, Source) |> group_by(Source) |> 
+                               summarise(N=n(), n=sum(.pred_class==Source), p=n/N), .id="method"),
+  xg = all_metrics |> map_df(function(x) x$xg$.predictions |> reduce(rbind) |> select(.pred_class, Source) |> group_by(Source) |> 
+                               summarise(N=n(), n=sum(.pred_class==Source), p=n/N), .id="method"), .id = "model"
+  ) |> 
+  mutate(dist = case_when(method |> str_detect("8g") ~ 15,
+                          method |> str_detect("ca0") ~ 1,
+                          method |> str_detect("Ph") ~ 17,
+                          TRUE ~ 19),
+         method2 = factor(method),
+         method = factor(str_sub(method2, 1,3), ordered=TRUE, levels=c("ca0", "pco", "cap")))
+  
+p3 |> 
+  ggplot(aes(x=method, y=p)) +
+  geom_point(aes(col=Source, shape=dist, group=as.factor(dist)), size=3, stroke=1.5, position = position_dodge(0.5)) +
+  scale_shape_identity(guide = "legend", breaks=c(15,17,19), labels=c("8grams","Phandango","Hamming")) +
+  #stat_summary(aes(group=as.factor(dist), col=method), geom = "point", fun = "mean", size = 5, shape = 4, position = position_dodge(0.5)) +
+  ylim(0,1) +
+  scale_colour_manual(values = c("#115896", "#4C4C53", "#BA2F00")) +
+  guides(col = guide_legend("Source")) +
+  labs(x = "Method of encoding", y = "Classification success", title = paste0("xgboost and rf results, SACNZ sample data, ", nfolds, " cv folds")) +
   theme_bw() +
   facet_wrap(~model, labeller = labeller(model=c("rf" = "Random Forest", "xg" = "xgboost")))
 
