@@ -16,21 +16,23 @@ genes <- names(cgMLST_seq_dat |> select(starts_with("CAMP")))
 
 
 # Hamming distance
-
 list_of_distance_matrices <- map(genes, function(x) dfun(x, dat, seqdat))
 names(list_of_distance_matrices) <- genes
 #save(list_of_distance_matrices, file="../CAP_Data/data/list_of_distance_matrices.RData") # distance matrices of hamming distances among unique alleles for each gene
 
 # ngrams
-list_of_7grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=7))
-names(list_of_7grams) <- genes
+list_of_6grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=6))
+names(list_of_6grams) <- genes
 list_of_8grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=8))
 names(list_of_8grams) <- genes
-list_of_9grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=9))
-names(list_of_9grams) <- genes
-#save(list_of_7grams, file="../CAP_Data/data/list_of_7grams.RData") 
+list_of_10grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=10))
+names(list_of_10grams) <- genes
+list_of_12grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=12))
+names(list_of_12grams) <- genes
+#save(list_of_6grams, file="../CAP_Data/data/list_of_6grams.RData") 
 #save(list_of_8grams, file="../CAP_Data/data/list_of_8grams.RData") 
-#save(list_of_9grams, file="../CAP_Data/data/list_of_9grams.RData") 
+#save(list_of_10grams, file="../CAP_Data/data/list_of_10grams.RData") 
+#save(list_of_12grams, file="../CAP_Data/data/list_of_12grams.RData") 
 
 
 
@@ -41,14 +43,12 @@ list_of_4grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=4))
 names(list_of_4grams) <- genes
 list_of_5grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=5))
 names(list_of_5grams) <- genes
-list_of_6grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=6))
-names(list_of_6grams) <- genes
-list_of_10grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=10))
-names(list_of_10grams) <- genes
+list_of_7grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=7))
+names(list_of_7grams) <- genes
+list_of_9grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=9))
+names(list_of_9grams) <- genes
 list_of_11grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=11))
 names(list_of_11grams) <- genes
-list_of_12grams <- map(genes, function(x) ngram_fun(x, dat, seqdat, ngram=12))
-names(list_of_12grams) <- genes
 
 check <- list("3grams"=list_of_3grams,
               "4grams"=list_of_4grams,
