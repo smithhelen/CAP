@@ -27,7 +27,7 @@ step_pco <- function(
     trained = FALSE,
     distances,
     axes = 1,
-    objects = NULL, # info from our training data
+    objects = NULL, # encoding info from our training data
     skip = FALSE,
     options = list(),
     id = rand_id("pco")
@@ -56,8 +56,6 @@ step_pco <- function(
 
 # PCO scoring function
 encode_pco <- function(x, distance, axes) {
-  epsilon <- sqrt(.Machine$double.eps)
-  
   x <- droplevels(x)
   d.train <- distance[levels(x),levels(x),drop=FALSE]
   A.train <- -0.5 * d.train^2
