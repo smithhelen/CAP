@@ -1,14 +1,14 @@
-# Recipe for CA rank method
+# Recipe for CA method
 
 # constructor function for our recipe step
 step_ca_rank_new <- 
-  function(terms, role, trained, ref_scores, options, skip, id) {
+  function(terms, role, trained, objects, options, skip, id) {
     step(
       subclass = "ca_rank", 
       terms = terms,
       role = role,
       trained = trained,
-      ref_scores = ref_scores,
+      objects = objects,
       options = options,
       skip = skip,
       id = id
@@ -21,7 +21,7 @@ step_ca_rank <- function(
     ..., 
     role = NA, 
     trained = FALSE, 
-    ref_scores = NULL, # scores of levels from the training data
+    objects = NULL, # scores of levels from the training data
     skip = FALSE,
     options = list(),  # TODO: Add default options here (e.g. for PCO)
     id = rand_id("ca_rank")
@@ -33,7 +33,7 @@ step_ca_rank <- function(
       terms = enquos(...),
       trained = trained,
       role = role,
-      ref_scores = ref_scores,
+      objects = objects,
       options = options,
       skip = skip,
       id = id
@@ -51,10 +51,8 @@ encode_ca_rank <- function(x, outcome) {
   x <- droplevels(x)
   if (nlevels(x) < 2) {
     # if we only have one level so we can't do anything
-    out <- data.frame(level = levels(x),
-                      rank = 1)
-    return(out)
-  }
+    return(null)
+    }
   ct <- table(level=x,outcome=outcome)
   P <- ct/rowSums(ct)
   S <- cov.wt(P, wt = rowSums(ct))$cov
@@ -98,7 +96,7 @@ prep.step_ca_rank <- function(x, training, info = NULL, ...) {
   # OK, now do the actual CA step on each column
   # This just computes the ranks: the actual data transformation
   # of current variables is done in 'prep' or 'bake' not here
-  ref_scores <- purrr::map(
+  objects <- purrr::map(
     training[, col_names], 
     \(x) encode_ca_rank(x, outcome = training |> pull(outcome_name))
   )
@@ -110,7 +108,7 @@ prep.step_ca_rank <- function(x, training, info = NULL, ...) {
     terms = x$terms, 
     trained = TRUE,
     role = x$role, 
-    ref_scores = ref_scores,
+    objects = objects,
     options = x$options,
     skip = x$skip,
     id = x$id
@@ -135,14 +133,14 @@ apply_rank_to_column <- function(x, encoding) {
 }
 
 bake.step_ca_rank <- function(object, new_data, ...) {
-  col_names <- names(object$ref_scores)
+  col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
   
   # iterate over and update our current columns
   for (col_name in col_names) {
     new_data[[col_name]] <- apply_rank_to_column(
       x = new_data[[col_name]],
-      encoding = object$ref_scores[[col_name]]
+      encoding = object$objects[[col_name]]
     )
   }
   
