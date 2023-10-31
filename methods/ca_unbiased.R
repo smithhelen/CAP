@@ -8,11 +8,8 @@ epsilon <- sqrt(.Machine$double.eps)
 factor_to_ca0_score <- function(var, class, k) {
   var_levels <- droplevels(var)
   if(nlevels(var_levels) < 2){
-    # if we only have one var_level we can't do anything - this is not right, it still has RANK in it
-    return(list(output = rep(1, times=length(var)),
-                extra = list(var_levels=levels(var_levels), dim = 1, suffix=NULL,
-                             score = data.frame(Var_Level = c(levels(var_levels), "new"), Rank = c(1, 2)))))
-      }  ## ?? check this ??
+    # if we only have one var_level we can't do anything
+    return(NULL)      }
   ct <- table(Var_Level=var_levels, Class=class)
   if(is.null(k)){k <- ncol(ct)-1}
   # add zero row - can't add zeros to ct as P will complain. So add 1/num.classes to P (equal probabilities across classes)
