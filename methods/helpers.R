@@ -1,5 +1,7 @@
 ## Helper functions for CAP methods
 
+epsilon <- sqrt(.Machine$double.eps)
+
 # Load libraries
 library(FactoMineR) #for CA function within hat()
 library(factoextra) #for get_ca_row function within hat()
