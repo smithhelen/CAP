@@ -1,14 +1,17 @@
 # Recipe for CA unbiased method
 
+source('methods/helpers.R')
+
 # constructor function for our recipe step
 step_ca_unbiased_new <- 
-  function(terms, role, trained, ref_scores, options, skip, id) {
+  function(terms, role, trained, k, objects, options, skip, id) {
     step(
       subclass = "ca_unbiased", 
       terms = terms,
       role = role,
       trained = trained,
-      ref_scores = ref_scores,
+      k = k,
+      objects = objects,
       options = options,
       skip = skip,
       id = id
@@ -21,7 +24,8 @@ step_ca_unbiased <- function(
     ..., 
     role = NA, 
     trained = FALSE, 
-    ref_scores = NULL, # scores of levels from the training data
+    k = NULL, # defaults to number of classes - 1
+    objects = NULL, # info from the training data
     skip = FALSE,
     options = list(),  # TODO: Add default options here (e.g. for PCO)
     id = rand_id("ca_unbiased")
@@ -33,7 +37,8 @@ step_ca_unbiased <- function(
       terms = enquos(...),
       trained = trained,
       role = role,
-      ref_scores = ref_scores,
+      k = k,
+      objects = objects,
       options = options,
       skip = skip,
       id = id
@@ -43,31 +48,42 @@ step_ca_unbiased <- function(
 
 # Prep step
 
-# CA rank (i.e. ranger) scoring function reimplemented
-encode_ca_unbiased <- function(x, outcome) {
-  #  cat("calling encode ca unbiased... with len(x)=", length(x), "len(outcome)=", length(outcome), "\n")
-  #  print(x)
+# CA unbiased scoring function   
+encode_ca_unbiased <- function(var, outcome, k) {
+  #  cat("calling encode ca unbiased... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
+  #  print(var)
   #  print(outcome)
-  x <- droplevels(x)
-  if (nlevels(x) < 2) {
+  #epsilon <- sqrt(.Machine$double.eps) # in helpers
+  
+  var <- droplevels(var)
+  if (nlevels(var) < 2) {
     # if we only have one level so we can't do anything
-    out <- data.frame(level = levels(x),
-                      rank = 1)
-    return(out)
-  }
-  ct <- table(level=x,outcome=outcome)
+    return(null)
+    }
+  ct <- table(level=var, outcome=outcome)
+  if(is.null(k)) {
+    k <- ncol(ct) - 1
+    }
   P <- ct/rowSums(ct)
   S <- cov.wt(P, wt = rowSums(ct))$cov
-  pc1 <- eigen(S)$vectors[,1]   ## PCA of weighted covariance matrix of class probabilities
-  
-  # compute scores and rank them. New levels will have score 0 but still need ranking
-  scores <- P %*% pc1
-  ranks <- as.numeric(rank(c(scores, 0), ties.method = "first"))
-  list(score = data.frame(level = rownames(scores), rank = ranks[-length(ranks)]),
-       new = ranks[length(ranks)])
+  eigen_S <- eigen_decomp(S, symmetric = TRUE)   ## PCA of weighted covariance matrix of class probabilities
+  # Restrict to a maximum of eigenvectors set by "k" (the number of axes) (default is NULL = ncol(ct)-1)
+  nlambdas <- min(sum(eigen_S$values > epsilon), k)
+  # principal components
+  pc <- eigen_S$vectors
+  X <- P %*% pc[, seq_len(nlambdas), drop=FALSE] |> as.data.frame() 
+  score <- left_join(data.frame(Var_Level = var_levels), X |> rownames_to_column("Var_Level"), by = "Var_Level")
+  output <- score |> select(-Var_Level)
+  list(output = output,
+       extra = list(X=X, k=k, var_levels=levels(var_levels), dim = ncol(X), suffix = colnames(X)))
+  # output is "objects"
 }
 
-prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
+prep.step_ca_unbiased <- function(x, training, info = NULL, ...) { 
+  # x is the object from the step_ca_unbiased function, 
+  # training is the training set data (tibble),
+  # and info is a tibble that has information on the current set of data eg variable name, type, and role
+  
   # grab the columns we're going to prep
   col_names <- recipes_eval_select(x$terms, training, info)
   
@@ -82,7 +98,7 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
   check_type(training[, col_names], types = c("character", "factor"))
   check_type(training[, outcome_name], types = c("character", "factor"))
   
-  # TODO: Implement this stuff if needed for options to the step
+    # TODO: Implement this stuff if needed for options to the step
   ## We'll use the names later so make sure they are available
   #  if (x$options$names == FALSE) {
   #    rlang::abort("`names` should be set to TRUE")
@@ -98,9 +114,9 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
   # OK, now do the actual CA step on each column
   # This just computes the ranks: the actual data transformation
   # of current variables is done in 'prep' or 'bake' not here
-  ref_scores <- purrr::map(
+  objects <- purrr::map(
     training[, col_names], 
-    \(x) encode_ca_unbiased(x, outcome = training |> pull(outcome_name))
+    \(var) encode_ca_unbiased(var = var, outcome = training |> pull(outcome_name), k = x$k)
   )
   
   ## Use the constructor function to return the updated object. 
@@ -110,7 +126,8 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
     terms = x$terms, 
     trained = TRUE,
     role = x$role, 
-    ref_scores = ref_scores,
+    k = x$k,
+    objects = objects,
     options = x$options,
     skip = x$skip,
     id = x$id
@@ -118,35 +135,57 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
 }
 
 # Bake step: take our scores and apply them as needed to the columns
-apply_unbiased_to_column <- function(x, encoding) {
+apply_unbiased_to_column <- function(var, encoding) {
   
-  # create the scoring matrix from the levels of x, and score
-  # things we haven't seen as effectively zero
-  x <- droplevels(x) # ignore levels we don't have in these data
+  new_level_to_ca0 <- function(new.var_level, X){
+    newX <- matrix(0, nrow = 1, ncol = ncol(X)) |> as.data.frame()
+    colnames(newX) <- colnames(X)
+    new_var_level_score <- data.frame(level = new.var_level, newX)
+    new_var_level_score
+  }
   
-  new_level_rank <- encoding$new
-  
-  ranks <- data.frame(level = x) |>
-    left_join(encoding$score, by="level") |>
-    replace_na(list(rank = new_level_rank)) |>
-    pull(rank)
-  
-  ranks
+  # create the scoring matrix from the levels of var, and score
+  # things we haven't seen as zero
+  var <- droplevels(var) # ignore levels we don't have in these data
+
+  # Now we figure out which levels are new, and which are the usual
+  new_levels <- setdiff(levels(var), encoding$levels)
+  new_scores <- map(new_levels, ~new_level_to_ca0(new.var_level = {.},
+                                                  X = encoding$X)) |> 
+    list_rbind()
+
+    var_level_score <- bind_rows(data.frame(encoding$X) |> rownames_to_column("level"), new_scores)
+  data.frame(level = var) |> left_join(var_level_score, by = "level") |> select(-level)
 }
 
 bake.step_ca_unbiased <- function(object, new_data, ...) {
-  col_names <- names(object$ref_scores)
+  # object is the updated step function that has been prepped, 
+  # new_data is a tibble of data to be processed.
+  col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
   
-  # iterate over and update our current columns
+  # generate some new names
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca0", seq_len(x$dim), sep="_") })
+  new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
+  
+  # iterate over and generate our new columns
   for (col_name in col_names) {
-    new_data[[col_name]] <- apply_unbiased_to_column(
-      x = new_data[[col_name]],
-      encoding = object$ref_scores[[col_name]]
-    )
+    i_col <- new_data[[col_name]]
+    i_obj <- object$objects[[col_name]]
+    if (!is.null(i_obj)) { # only if we need to include this column...
+      new_data[[col_name]] <- apply_unbiased_to_column(var = i_col, encoding = i_obj)
+      new_col_names <- new_names[[col_name]]
+      colnames(new_cols) <- new_col_names
+      new_tbl[new_col_names] <- new_cols
+    }
   }
   
   # new_data will be a tibble when passed to this function. It should also
   # be a tibble on the way out.
+  # check the new names and produce our final dataset
+  new_tbl <- check_name(new_tbl, new_data, object, names(new_tbl))
+  new_data <- bind_cols(new_data, new_tbl)
+  new_data <- dplyr::select(new_data, -dplyr::all_of(col_names))
   new_data
 }
+
