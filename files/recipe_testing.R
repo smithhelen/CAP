@@ -4,10 +4,12 @@ library(recipes)
 library(rsample)
 source('methods/recipe_ca.R')
 source('methods/recipe_ca0.R')
+source("methods/recipe_pco.R")
 
 
 load("../CAP_data/data/cgMLST_dat.RData") # SACNZ cgMLST data set (jejuni and coli)
 Dat_jc <- cgMLST %>% filter(Source != "Human") %>% droplevels() %>% mutate(across(everything(), factor)) 
+Dat_jc <- Dat_jc |> select(c(1:3, "Source")) |> slice_sample(n=50)
 
 set.seed(3)
 
@@ -96,14 +98,14 @@ foo_test |> as_tibble(); baked_test
 
 
 #### NOW PCO...
-source("methods/recipe_pco.R")
-
 load("../CAP_data/data/list_of_distance_matrices.RData")
+
 # RIGHT, let's mess with one of them to have variance zero...
 jc_train$CAMP0001 <- rep(jc_train$CAMP0001[1], nrow(jc_train))
+
 my_recipe <- 
   recipe(Source ~ ., data=jc_train) |>
-  step_pco(starts_with("CAMP"), distances = list_of_distance_matrices[1:2], axes=1)
+  step_pco(starts_with("CAMP"), distances = list_of_distance_matrices[1:2], m=1)
 
 prepped_recipe <- my_recipe |>
   prep()
