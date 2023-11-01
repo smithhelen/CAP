@@ -61,15 +61,14 @@ impute_score_ca0 <- function(var, extra) {
 # iterate over the variable columns and use the extra info from before to remap the levels in the test data. 
 prepare_test_ca0 <- function(data, list_of_extras, id, residualised=NULL) {
   # first remap the variable levels to the appropriate ordinal level
-  id <- data |> select(all_of(id))
   test_data <- data |> select(any_of(names(list_of_extras)))
   newdata_score <- map2(test_data, list_of_extras, impute_score_ca0)
   output <- map(newdata_score,"test_score")
   newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
   newdata_pred <- if(!is.null(residualised)) {
-    bind_cols(id, data |> select(all_of(residualised)), newdata_pred)
+    bind_cols(data |> select(all_of(id), all_of(residualised)), newdata_pred)
   } else {
-    bind_cols(id, newdata_pred)
+    bind_cols(data |> select(all_of(id)), newdata_pred)
   }
   newdata_pred
 }
