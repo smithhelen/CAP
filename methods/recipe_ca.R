@@ -50,7 +50,7 @@ step_ca <- function(
 
 # CA scoring function (i.e. ranger but with scores not ranks) 
 encode_ca <- function(var, outcome, k) {
-    cat("calling encode ca ... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
+   # cat("calling encode ca ... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
   #  print(var)
   #  print(outcome)
   #epsilon <- sqrt(.Machine$double.eps) # in helpers
@@ -61,7 +61,7 @@ encode_ca <- function(var, outcome, k) {
     return(null)
     }
   ct <- table(level=var, outcome=outcome)
-  if(is.null(k)) {
+  if(!length(k)) {
     k <- ncol(ct) - 1
   }
   P <- ct/rowSums(ct)
@@ -76,7 +76,7 @@ encode_ca <- function(var, outcome, k) {
   objects <- list(levels = levels(var),
                   X=X)
   objects
-  print(objects)
+  #print(objects)
 }
 
 prep.step_ca <- function(x, training, info = NULL, ...) {
