@@ -9,7 +9,7 @@ factor_to_ca_score <- function(var, class, k) {
     # if we only have one var_level we can't do anything
     return(NULL)  }
   ct <- table(Var_Level=var_levels, class=class)
-  if(is.null(k)){k <- ncol(ct)-1}
+  if(!length(k)){k <- ncol(ct)-1}
   P <- ct/rowSums(ct)
   S <- cov.wt(P, wt = rowSums(ct))$cov
   
