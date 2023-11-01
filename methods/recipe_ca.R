@@ -1,13 +1,16 @@
 # Recipe for CA method
 
+source('methods/helpers.R')
+
 # constructor function for our recipe step
-step_ca_rank_new <- 
-  function(terms, role, trained, objects, options, skip, id) {
+step_ca_new <- 
+  function(terms, role, trained, k, objects, options, skip, id) {
     step(
-      subclass = "ca_rank", 
+      subclass = "ca", 
       terms = terms,
       role = role,
       trained = trained,
+      k = k,
       objects = objects,
       options = options,
       skip = skip,
@@ -16,23 +19,25 @@ step_ca_rank_new <-
   }
 
 # user facing function for our recipe
-step_ca_rank <- function(
+step_ca <- function(
     recipe, 
     ..., 
     role = NA, 
     trained = FALSE, 
+    k = NULL, # defaults to number of classes - 1
     objects = NULL, # scores of levels from the training data
     skip = FALSE,
     options = list(),  # TODO: Add default options here (e.g. for PCO)
-    id = rand_id("ca_rank")
+    id = rand_id("ca")
 ) {
   
   add_step(
     recipe, 
-    step_ca_rank_new(
+    step_ca_new(
       terms = enquos(...),
       trained = trained,
       role = role,
+      k = k,
       objects = objects,
       options = options,
       skip = skip,
@@ -43,29 +48,42 @@ step_ca_rank <- function(
 
 # Prep step
 
-# CA rank (i.e. ranger) scoring function reimplemented
-encode_ca_rank <- function(x, outcome) {
-  #  cat("calling encode ca rank... with len(x)=", length(x), "len(outcome)=", length(outcome), "\n")
-  #  print(x)
+# CA scoring function (i.e. ranger but with scores not ranks) 
+encode_ca <- function(var, outcome, k) {
+    cat("calling encode ca ... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
+  #  print(var)
   #  print(outcome)
-  x <- droplevels(x)
-  if (nlevels(x) < 2) {
+  #epsilon <- sqrt(.Machine$double.eps) # in helpers
+  
+  var <- droplevels(var)
+  if (nlevels(var) < 2) {
     # if we only have one level so we can't do anything
     return(null)
     }
-  ct <- table(level=x,outcome=outcome)
+  ct <- table(level=var, outcome=outcome)
+  if(is.null(k)) {
+    k <- ncol(ct) - 1
+  }
   P <- ct/rowSums(ct)
   S <- cov.wt(P, wt = rowSums(ct))$cov
-  pc1 <- eigen(S)$vectors[,1]   ## PCA of weighted covariance matrix of class probabilities
-  score <- P %*% pc1 %>% as.data.frame() %>%
-    rownames_to_column("level") %>%
-    setNames(., c("level","pc1")) %>%
-    mutate(rank = as.numeric(rank(pc1, ties.method = "first"))) %>%
-    select(level, rank)
-  return(score)
+  
+  eigen_S <- eigen_decomp(S, symmetric = TRUE)   ## PCA of weighted covariance matrix of class probabilities
+  # Restrict to a maximum of eigenvectors set by "k" (the number of axes) (default is NULL = ncol(ct)-1)
+  nlambdas <- min(sum(eigen_S$values > epsilon), k)
+  # principal components
+  pc <- eigen_S$vectors
+  X <- P %*% pc[, seq_len(nlambdas), drop=FALSE] |> as.data.frame() 
+  objects <- list(levels = levels(var),
+                  X=X)
+  objects
+  print(objects)
 }
 
-prep.step_ca_rank <- function(x, training, info = NULL, ...) {
+prep.step_ca <- function(x, training, info = NULL, ...) {
+  # x is the object from the step_ca function, 
+  # training is the training set data (tibble),
+  # and info is a tibble that has information on the current set of data eg variable name, type, and role
+  
   # grab the columns we're going to prep
   col_names <- recipes_eval_select(x$terms, training, info)
   
@@ -94,20 +112,21 @@ prep.step_ca_rank <- function(x, training, info = NULL, ...) {
   #  }
   
   # OK, now do the actual CA step on each column
-  # This just computes the ranks: the actual data transformation
+  # This just computes the scores: the actual data transformation
   # of current variables is done in 'prep' or 'bake' not here
   objects <- purrr::map(
     training[, col_names], 
-    \(x) encode_ca_rank(x, outcome = training |> pull(outcome_name))
+    \(var) encode_ca(var = var, outcome = training |> pull(outcome_name), k = x$k)
   )
   
   ## Use the constructor function to return the updated object. 
   ## Note that `trained` is now set to TRUE
   
-  step_ca_rank_new(
+  step_ca_new(
     terms = x$terms, 
     trained = TRUE,
     role = x$role, 
+    k = x$k,
     objects = objects,
     options = x$options,
     skip = x$skip,
@@ -116,35 +135,53 @@ prep.step_ca_rank <- function(x, training, info = NULL, ...) {
 }
 
 # Bake step: take our scores and apply them as needed to the columns
-apply_rank_to_column <- function(x, encoding) {
+apply_ca_to_column <- function(var, encoding) {
   
-  # create the scoring matrix from the levels of x, and score
+  new_level_to_ca <- function(new.var_level, X){
+    newX <- X |> map(max) |> as.data.frame() |> mutate(across(everything(), \(x) x+1))
+    colnames(newX) <- colnames(X)
+    new_var_level_score <- data.frame(level = new.var_level, newX)
+    new_var_level_score
+  }
+  
+  # create the scoring matrix from the levels of var, and score
   # things we haven't seen as effectively infinite
-  x <- droplevels(x) # ignore levels we don't have in these data
-  
-  new_level_rank <- max(encoding$rank) + 1
-  
-  ranks <- data.frame(level = x) |>
-    left_join(encoding, by="level") |>
-    replace_na(list(rank = new_level_rank)) |>
-    pull(rank)
-  
-  ranks
+  var <- droplevels(var) # ignore levels we don't have in these data
+  # Now we figure out which levels are new, and which are the usual
+  new_levels <- setdiff(levels(var), encoding$levels)
+  new_scores <- map(new_levels, ~new_level_to_ca(new.var_level = {.}, X = encoding$X)) |> list_rbind()
+  var_level_score <- bind_rows(data.frame(encoding$X) |> rownames_to_column("level"), new_scores)
+  new_cols <- data.frame(level = var) |> left_join(var_level_score, by = "level") |> select(-level)
+  new_cols
 }
 
-bake.step_ca_rank <- function(object, new_data, ...) {
+bake.step_ca <- function(object, new_data, ...) {
+  # object is the updated step function that has been prepped, 
+  # new_data is a tibble of data to be processed.
   col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
   
-  # iterate over and update our current columns
+  # generate some new names
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca", seq_len(ncol(x$X)), sep="_") })
+  new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
+  
+  # iterate over and generate our new columns
   for (col_name in col_names) {
-    new_data[[col_name]] <- apply_rank_to_column(
-      x = new_data[[col_name]],
-      encoding = object$objects[[col_name]]
-    )
+    i_col <- new_data[[col_name]]
+    i_obj <- object$objects[[col_name]]
+    if (!is.null(i_obj)) { # only if we need to include this column...
+      new_cols <- apply_ca_to_column(var = i_col, encoding = i_obj)
+      new_col_names <- new_names[[col_name]]
+      colnames(new_cols) <- new_col_names
+      new_tbl[new_col_names] <- new_cols
+    }
   }
   
   # new_data will be a tibble when passed to this function. It should also
   # be a tibble on the way out.
+  # check the new names and produce our final dataset
+  new_tbl <- check_name(new_tbl, new_data, object, names(new_tbl))
+  new_data <- bind_cols(new_data, new_tbl)
+  new_data <- dplyr::select(new_data, -dplyr::all_of(col_names))
   new_data
 }
