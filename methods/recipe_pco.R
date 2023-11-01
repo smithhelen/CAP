@@ -4,14 +4,15 @@ source('methods/helpers.R')
 
 # constructor function for our recipe step
 step_pco_new <- 
-  function(terms, role, trained, distances, axes, objects, options, skip, id) {
+  function(terms, role, trained, distances, m, mp, objects, options, skip, id) {
     step(
       subclass = "pco", 
       terms = terms,
       role = role,
       trained = trained,
       distances = distances,
-      axes = axes,
+      m = m,
+      mp = mp,
       objects = objects,
       options = options,
       skip = skip,
@@ -26,15 +27,16 @@ step_pco <- function(
     role = NA, 
     trained = FALSE,
     distances,
-    axes = 1,
+    m = NULL,
+    mp = 100,
     objects = NULL, # encoding info from our training data
     skip = FALSE,
     options = list(),
     id = rand_id("pco")
 ) {
   
-  if (TRUE) { #!recipes::is_tune(axes)) { # TODO: Do we need to check for tuning here???
-    axes <- as.integer(axes)
+  if (TRUE) { #!recipes::is_tune(m)) { # TODO: Do we need to check for tuning here???
+    m <- as.integer(m)
   }
   add_step(
     recipe, 
@@ -43,7 +45,8 @@ step_pco <- function(
       trained = trained,
       role = role,
       distances = distances,
-      axes = axes,
+      m = m,
+      mp = mp,
       objects = objects,
       options = options,
       skip = skip,
@@ -55,33 +58,41 @@ step_pco <- function(
 # Prep step
 
 # PCO scoring function
-encode_pco <- function(var, distance, axes) {
+encode_pco <- function(var, distance, m, mp) {
   var <- droplevels(var)
   d.train <- distance[levels(var),levels(var),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)
   eigen_B <- eigen_decomp(B.train, symmetric=TRUE)
-  # use only non-zero eigenvalues and restrict to a maximum of eigenvectors set by "axes".
-  # TODO: Add alternate limit based on variance explained
-  nlambdas <- min(sum(eigen_B$values > epsilon), axes)
+  
+  # use only non-zero eigenvalues
+  nlambdas <- sum(eigen_B$values > epsilon)
   if (nlambdas == 0) {
-    # No non-zero eigenvectors, so this variable will be dropped
+    # No non-zero eigenvectors
     return(NULL)
   }
+  # Restrict to a maximum of eigenvectors set by "m" or "mp (propG)" (default is mp=100% variation)
+  lambdas_B <- filter_eigenvalues(eigen_B$values, m=m, mp=mp) # restrict by axes or mp
   # Scale eigenvectors
-  lambdas_B <- eigen_B$values[seq_len(nlambdas)]
   Qo <- eigen_B$vectors
-  Q <- sweep(Qo[, seq_len(nlambdas), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
-  objects <- list(levels = levels(var),
-                  d=distance,
-                  Q=Q,
-                  diag.B.train = diag(B.train),
+  Q <- sweep(Qo[, seq_along(lambdas_B), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
+  objects <- list(#levels = levels(var),
+                  #d=distance,
+                  #Q=Q,
+                  #diag.B.train = diag(B.train),
                   lambdas_B=lambdas_B,
-                  propG = cumsum(lambdas_B)/sum(eigen_B$values))
+                  propG = cumsum(eigen_B$values)/sum(eigen_B$values)*100,
+                  m = m, mp = mp, eigenB = eigen_B$values)
   objects
+  print(objects)
+  print(is.null(m))
 }
 
 prep.step_pco <- function(x, training, info = NULL, ...) {
+  # x is the object from the step_pco function, 
+  # training is the training set data (tibble),
+  # and info is a tibble that has information on the current set of data eg variable name, type, and role
+  
   # grab the columns we're going to prep
   col_names <- recipes_eval_select(x$terms, training, info)
   
@@ -109,13 +120,18 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
   # convert distances to matrices
   x$distances <- map(x$distances, as.matrix)
   
+  cat("mp = ", x$mp, "\n")
+  cat("m = ", x$m, "\n")
+  print(str(x$m))
+  
   # OK, now do the actual PCO step on each column
-  # This computes the axes etc using the distance matrices
+  # This computes the m etc using the distance matrices.
+  # The actual data transformation
   # of current variables is done in 'prep' or 'bake' not here
   objects <- purrr::map2(
     training[, col_names],
     x$distances[col_names],
-    \(var, dist) encode_pco(var=var, distance = dist, axes = x$axes)
+    \(var, dist) encode_pco(var=var, distance = dist, m = x$m, mp = x$mp)
   )
   
   ## Use the constructor function to return the updated object. 
@@ -126,7 +142,8 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
     trained = TRUE,
     role = x$role, 
     distances = x$distances,
-    axes = x$axes,
+    m = x$m,
+    mp = x$mp,
     objects = objects,
     options = x$options,
     skip = x$skip,
@@ -138,7 +155,7 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
 apply_pco_to_column <- function(var, encoding) {
   
   # Gower's transformation of new observations into PCO space
-  new_observation_to_pco <- function(new.var_level, d, diag.B.train, Q, lambdas_B) {
+  new_level_to_pco <- function(new.var_level, d, diag.B.train, Q, lambdas_B) {
     d.new <- d[new.var_level, names(diag.B.train)]
     d.gower <- diag.B.train - (d.new ^ 2)
     newQ <- d.gower %*% Q / (2 * lambdas_B)
@@ -151,11 +168,11 @@ apply_pco_to_column <- function(var, encoding) {
   
   # Now we figure out which levels are new, and which are the usual
   new_levels <- setdiff(levels(var), encoding$levels)
-  new_scores <- map(new_levels, ~new_observation_to_pco(new.var_level = {.},
-                                                        d = encoding$d,
-                                                        diag.B.train = encoding$diag.B.train,
-                                                        Q = encoding$Q, 
-                                                        lambdas_B = encoding$lambdas_B)) |>
+  new_scores <- map(new_levels, ~new_level_to_pco(new.var_level = {.},
+                                                  d = encoding$d,
+                                                  diag.B.train = encoding$diag.B.train,
+                                                  Q = encoding$Q, 
+                                                  lambdas_B = encoding$lambdas_B)) |>
     list_rbind()
   
   var_level_score <- bind_rows(data.frame(encoding$Q) %>% rownames_to_column("level"), new_scores)
@@ -164,6 +181,8 @@ apply_pco_to_column <- function(var, encoding) {
 }
 
 bake.step_pco <- function(object, new_data, ...) {
+  # object is the updated step function that has been prepped, 
+  # new_data is a tibble of data to be processed.
   
   col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
