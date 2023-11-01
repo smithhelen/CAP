@@ -1,6 +1,8 @@
 #### Prepare test data and training data for ca method ####
 
 # Function to map from variable levels to scores
+epsilon <- sqrt(.Machine$double.eps)
+
 factor_to_ca_score <- function(var, class, k) {
   var_levels <- droplevels(var)
   if (nlevels(var_levels) < 2) {
@@ -8,19 +10,17 @@ factor_to_ca_score <- function(var, class, k) {
     return(NULL)  }
   ct <- table(Var_Level=var_levels, class=class)
   if(is.null(k)){k <- ncol(ct)-1}
-  # add zero row - can't add zeros to ct as P will complain. So add 1/num.classes to P (equal probabilities across classes)
-  new <- matrix(rep((1/nlevels(class)),times=nlevels(class)),nrow=1, 
-                ncol=nlevels(class), dimnames = list(Var_Level="new",Class=colnames(ct)))
-  P <- rbind(ct/rowSums(ct),new)
-  S <- cov.wt(P, wt = c(rowSums(ct),0))$cov
+  P <- ct/rowSums(ct)
+  S <- cov.wt(P, wt = rowSums(ct))$cov
   
   eigen_S <- eigen_decomp(S, symmetric=TRUE) ## PCA of weighted covariance matrix of class probabilites
   # Restrict to a maximum of eigenvectors set by "k" (the number of axes) (default is NULL = ncol(ct)-1)
   nlambdas <- min(sum(eigen_S$values > epsilon), k)
+  # principal components
   pc <- eigen_S$vectors
   X <- P %*% pc[, seq_len(nlambdas), drop=FALSE] |> as.data.frame() 
   score <- left_join(data.frame(Var_Level = var_levels), X |> rownames_to_column("Var_Level"), by = "Var_Level")
-  output <- score |> select(-Var_level)
+  output <- score |> select(-Var_Level)
   list(output = output,
        extra = list(X=X, k=k, var_levels=levels(var_levels), dim = ncol(X), suffix = colnames(X)))
 }
@@ -33,7 +33,6 @@ prepare_training_ca <- function(data, var_cols, class, k=NULL) {
   # iterate over the variable columns, and convert
   prepped <- map(var_cols, factor_to_ca_score, class = classes, k=k)
   output <- map(prepped,"output")
-
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
   extra <- map(prepped, "extra")
@@ -42,56 +41,32 @@ prepare_training_ca <- function(data, var_cols, class, k=NULL) {
 }
 
 # score absent levels as infinite
-impute_ordinal_ca <- function(var, extra) {
-  var <- droplevels(var)
-  var_levels <- pluck(extra, "var_levels")
-  new.var_levels <- setdiff(levels(var), var_levels)
-  X <- pluck(extra, "X")
-
-  
+predict_ca <- function(new.var_level, X) {
+  newX <- X |> map(max) |> as.data.frame() |> mutate(across(everything(), \(x) x+1))
+  colnames(newX) = colnames(X)
+  new_var_level_score <- data.frame(Var_Level = new.var_level, newX)
+  new_var_level_score
 }
 
 # given var information and a level map, do the mapping. New var_levels are mapped to 'new'
 impute_score_ca <- function(var, extra) {
-  X <- pluck(extra, "X")
-  new_var_level_score <- X %>% filter(Var_level == "new") %>% pull(PC1)
-  test_score <- data.frame(Var_level = var) %>%
-    left_join(X, by="Var_level") %>%
-    replace_na(list(PC1 = new_var_level_score))
-  test_score %>% pull(PC1)
-}
-
-
-# given variable information and a level map, do the mapping. Absent levels are mapped to 'new'
-impute_score_ca0 <- function(var, extra) {
   var <- droplevels(var)
   var_levels <- pluck(extra, "var_levels")
   new.var_levels <- setdiff(levels(var), var_levels)
   X <- pluck(extra, "X")
-  new_var_level_score <- X |> rownames_to_column("Var_Level") |> filter(Var_Level == "new") |> select(-Var_Level) |> as.list()
-  test_score <- data.frame(Var_Level = var) |> left_join(X |> rownames_to_column("Var_Level"), by="Var_Level") |> replace_na(replace=new_var_level_score)
-  list(test_score = test_score |> select(-Var_Level))
+  
+  new_var_level_score <- map_df(new.var_levels, ~predict_ca(new.var_level = {.}, X))
+  var_level_score <- bind_rows(data.frame(X) |> rownames_to_column("Var_Level"), new_var_level_score)
+  
+  list(test_score = data.frame(Var_Level = var) |> left_join(var_level_score, by = "Var_Level") |> select(-Var_Level))
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # iterate over the variable columns and use the extra info from before to remap the levels in the test data. 
 prepare_test_ca <- function(data, list_of_extras, id) {
-  # first remap the variable levels to the appropriate ordinal level
-  id <- data |> pull({{id}})
   test_data <- data |> select(any_of(names(list_of_extras)))
-  newdata_pred <- map2_dfc(test_data, list_of_extras, impute_score_ca)
-  newdata_pred <- bind_cols(id=id, newdata_pred)
+  newdata_score <- map2(test_data, list_of_extras, impute_score_ca)
+  output <- map(newdata_score,"test_score")
+  newdata_pred <- map2_dfc(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep=".")))
+  newdata_pred <- bind_cols(data |> select(all_of(id)), newdata_pred)
   newdata_pred
 }
