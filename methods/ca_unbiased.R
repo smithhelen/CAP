@@ -11,7 +11,7 @@ factor_to_ca0_score <- function(var, class, k) {
     # if we only have one var_level we can't do anything
     return(NULL)      }
   ct <- table(Var_Level=var_levels, Class=class)
-  if(is.null(k)){k <- ncol(ct)-1}
+  if(!length(k)){k <- ncol(ct)-1}
   # add zero row - can't add zeros to ct as P will complain. So add 1/num.classes to P (equal probabilities across classes)
   new <- matrix(rep((1/nlevels(class)),times=nlevels(class)),nrow=1, 
                 ncol=nlevels(class), dimnames = list(Var_Level="new",Class=colnames(ct)))
