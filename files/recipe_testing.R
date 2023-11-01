@@ -98,28 +98,41 @@ foo_test |> as_tibble(); baked_test
 #### NOW PCO...
 source("methods/recipe_pco.R")
 
-load("../CAP_data/data/list_of_distance_matrices_all.RData")
+load("../CAP_data/data/list_of_distance_matrices.RData")
 # RIGHT, let's mess with one of them to have variance zero...
 jc_train$CAMP0001 <- rep(jc_train$CAMP0001[1], nrow(jc_train))
 my_recipe <- 
   recipe(Source ~ ., data=jc_train) |>
-  step_pco(starts_with("CAMP"), distances = list_of_distance_matrices_all, axes=10)
+  step_pco(starts_with("CAMP"), distances = list_of_distance_matrices[1:2], axes=1)
 
 prepped_recipe <- my_recipe |>
   prep()
 
 baked_train <- prepped_recipe |>
   bake(jc_train)
+baked_test <- prepped_recipe |>
+  bake(jc_test)
 
 # Try the old method
 source("methods/pco.R")
 
-foo <- prepare_training_pco(jc_train, starts_with("CAMP"), "Source", list_of_distance_matrices_all, m=10)$training
+foo <- prepare_training_pco(jc_train, starts_with("CAMP"), "Source", list_of_distance_matrices[1:2], m=1)
+foo_train <- foo$training
 switch_name <- function(nm) {
   root <- substring(nm, 1, 8)
   colnum <- substring(nm, 11)
   paste(root, "pco", colnum, sep="_")
 }
-names(foo) <- map_chr(names(foo), switch_name)
+names(foo_train) <- map_chr(names(foo_train), switch_name)
 
-baked_train |> anti_join(foo) # SAME! :)
+baked_train |> anti_join(foo_train) # SAME! :)
+foo_train |> anti_join(baked_train)
+foo_train |> as_tibble(); baked_train
+# YAY, they're the same! :)
+
+foo_test <- prepare_test_pco(jc_test, foo$extra, "LabID")
+names(foo_test) <- map_chr(names(foo_test), switch_name)
+baked_test |> anti_join(foo_test)
+foo_test |> anti_join(baked_test)
+foo_test |> as_tibble(); baked_test
+# YAY, they're the same! :)
