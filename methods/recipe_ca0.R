@@ -60,7 +60,7 @@ encode_ca_unbiased <- function(var, outcome, k) {
     return(null)
     }
   ct <- table(level=var, outcome=outcome)
-  if(is.null(k)) {
+  if(!length(k)) {
     k <- ncol(ct) - 1
     }
   P <- ct/rowSums(ct)
