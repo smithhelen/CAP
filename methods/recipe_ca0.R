@@ -149,14 +149,11 @@ apply_unbiased_to_column <- function(var, encoding) {
 
   # Now we figure out which levels are new, and which are the usual
   new_levels <- setdiff(levels(var), encoding$levels)
-  new_scores <- map(new_levels, ~new_level_to_ca0(new.var_level = {.},
-                                                  X = encoding$X)) |> 
-    list_rbind()
-
+  new_scores <- map(new_levels, ~new_level_to_ca0(new.var_level = {.}, X = encoding$X)) |> list_rbind()
   var_level_score <- bind_rows(data.frame(encoding$X) |> rownames_to_column("level"), new_scores)
   new_cols <- data.frame(level = var) |> left_join(var_level_score, by = "level") |> select(-level)
   new_cols
-  cat("new_cols for ", new_levels, "\n")
+  #cat("new_cols for ", new_levels, "\n")
   #print(new_cols)
 }
 
