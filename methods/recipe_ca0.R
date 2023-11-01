@@ -50,11 +50,10 @@ step_ca_unbiased <- function(
 
 # CA unbiased scoring function   
 encode_ca_unbiased <- function(var, outcome, k) {
-  #  cat("calling encode ca unbiased... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
-  #  print(var)
-  #  print(outcome)
-  #epsilon <- sqrt(.Machine$double.eps) # in helpers
-  
+    #cat("calling encode ca unbiased... with len(var)=", length(var), "len(outcome)=", length(outcome), "\n")
+    #print(var)
+    #print(outcome)
+
   var <- droplevels(var)
   if (nlevels(var) < 2) {
     # if we only have one level so we can't do anything
@@ -72,11 +71,11 @@ encode_ca_unbiased <- function(var, outcome, k) {
   # principal components
   pc <- eigen_S$vectors
   X <- P %*% pc[, seq_len(nlambdas), drop=FALSE] |> as.data.frame() 
-  score <- left_join(data.frame(Var_Level = var_levels), X |> rownames_to_column("Var_Level"), by = "Var_Level")
-  output <- score |> select(-Var_Level)
-  list(output = output,
-       extra = list(X=X, k=k, var_levels=levels(var_levels), dim = ncol(X), suffix = colnames(X)))
+  objects <- list(levels = levels(var),
+                  X=X)
   # output is "objects"
+  objects
+  #print(objects)
 }
 
 prep.step_ca_unbiased <- function(x, training, info = NULL, ...) { 
@@ -154,8 +153,11 @@ apply_unbiased_to_column <- function(var, encoding) {
                                                   X = encoding$X)) |> 
     list_rbind()
 
-    var_level_score <- bind_rows(data.frame(encoding$X) |> rownames_to_column("level"), new_scores)
-  data.frame(level = var) |> left_join(var_level_score, by = "level") |> select(-level)
+  var_level_score <- bind_rows(data.frame(encoding$X) |> rownames_to_column("level"), new_scores)
+  new_cols <- data.frame(level = var) |> left_join(var_level_score, by = "level") |> select(-level)
+  new_cols
+  cat("new_cols for ", new_levels, "\n")
+  #print(new_cols)
 }
 
 bake.step_ca_unbiased <- function(object, new_data, ...) {
@@ -165,7 +167,7 @@ bake.step_ca_unbiased <- function(object, new_data, ...) {
   check_new_data(col_names, object, new_data)
   
   # generate some new names
-  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca0", seq_len(x$dim), sep="_") })
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca0", seq_len(ncol(x$X)), sep="_") })
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
   
   # iterate over and generate our new columns
@@ -173,7 +175,7 @@ bake.step_ca_unbiased <- function(object, new_data, ...) {
     i_col <- new_data[[col_name]]
     i_obj <- object$objects[[col_name]]
     if (!is.null(i_obj)) { # only if we need to include this column...
-      new_data[[col_name]] <- apply_unbiased_to_column(var = i_col, encoding = i_obj)
+      new_cols <- apply_unbiased_to_column(var = i_col, encoding = i_obj)
       new_col_names <- new_names[[col_name]]
       colnames(new_cols) <- new_col_names
       new_tbl[new_col_names] <- new_cols
