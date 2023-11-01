@@ -76,16 +76,14 @@ encode_pco <- function(var, distance, m, mp) {
   # Scale eigenvectors
   Qo <- eigen_B$vectors
   Q <- sweep(Qo[, seq_along(lambdas_B), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
-  objects <- list(#levels = levels(var),
-                  #d=distance,
-                  #Q=Q,
-                  #diag.B.train = diag(B.train),
+  objects <- list(levels = levels(var),
+                  d=distance,
+                  Q=Q,
+                  diag.B.train = diag(B.train),
                   lambdas_B=lambdas_B,
-                  propG = cumsum(eigen_B$values)/sum(eigen_B$values)*100,
-                  m = m, mp = mp, eigenB = eigen_B$values)
+                  propG = cumsum(eigen_B$values)/sum(eigen_B$values)*100)
   objects
-  print(objects)
-  print(is.null(m))
+  #print(objects)
 }
 
 prep.step_pco <- function(x, training, info = NULL, ...) {
@@ -119,10 +117,6 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
   }
   # convert distances to matrices
   x$distances <- map(x$distances, as.matrix)
-  
-  cat("mp = ", x$mp, "\n")
-  cat("m = ", x$m, "\n")
-  print(str(x$m))
   
   # OK, now do the actual PCO step on each column
   # This computes the m etc using the distance matrices.
