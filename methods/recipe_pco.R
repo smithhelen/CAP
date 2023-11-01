@@ -55,31 +55,30 @@ step_pco <- function(
 # Prep step
 
 # PCO scoring function
-encode_pco <- function(x, distance, axes) {
-  x <- droplevels(x)
-  d.train <- distance[levels(x),levels(x),drop=FALSE]
+encode_pco <- function(var, distance, axes) {
+  var <- droplevels(var)
+  d.train <- distance[levels(var),levels(var),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)
   eigen_B <- eigen_decomp(B.train, symmetric=TRUE)
-  # use only non-zero eigenvalues
-  nlambdas <- sum(eigen_B$values > epsilon)
+  # use only non-zero eigenvalues and restrict to a maximum of eigenvectors set by "axes".
+  # TODO: Add alternate limit based on variance explained
+  nlambdas <- min(sum(eigen_B$values > epsilon), axes)
   if (nlambdas == 0) {
     # No non-zero eigenvectors, so this variable will be dropped
     return(NULL)
   }
-  # Restrict to a maximum of eigenvectors set by "axes".
-  # TODO: Add alternate limit based on variance explained
-  nlambdas <- min(nlambdas, axes)
   # Scale eigenvectors
   lambdas_B <- eigen_B$values[seq_len(nlambdas)]
   Qo <- eigen_B$vectors
   Q <- sweep(Qo[, seq_len(nlambdas), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
-  list(levels = levels(x),
-       d=distance,
-       Q=Q,
-       diag.B.train = diag(B.train),
-       lambdas_B=lambdas_B,
-       propG = cumsum(lambdas_B)/sum(eigen_B$values))
+  objects <- list(levels = levels(var),
+                  d=distance,
+                  Q=Q,
+                  diag.B.train = diag(B.train),
+                  lambdas_B=lambdas_B,
+                  propG = cumsum(lambdas_B)/sum(eigen_B$values))
+  objects
 }
 
 prep.step_pco <- function(x, training, info = NULL, ...) {
@@ -116,7 +115,7 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
   objects <- purrr::map2(
     training[, col_names],
     x$distances[col_names],
-    \(var, dist) encode_pco(x=var, distance = dist, axes = x$axes)
+    \(var, dist) encode_pco(var=var, distance = dist, axes = x$axes)
   )
   
   ## Use the constructor function to return the updated object. 
@@ -136,7 +135,7 @@ prep.step_pco <- function(x, training, info = NULL, ...) {
 }
 
 # Bake step: take our scores and apply them as needed to the columns
-apply_pco_to_column <- function(x, encoding) {
+apply_pco_to_column <- function(var, encoding) {
   
   # Gower's transformation of new observations into PCO space
   new_observation_to_pco <- function(new.var_level, d, diag.B.train, Q, lambdas_B) {
@@ -148,10 +147,10 @@ apply_pco_to_column <- function(x, encoding) {
     new_var_level_score
   }
   
-  x <- droplevels(x) # ignore levels we don't have in these data
+  var <- droplevels(var) # ignore levels we don't have in these data
   
   # Now we figure out which levels are new, and which are the usual
-  new_levels <- setdiff(levels(x), encoding$levels)
+  new_levels <- setdiff(levels(var), encoding$levels)
   new_scores <- map(new_levels, ~new_observation_to_pco(new.var_level = {.},
                                                         d = encoding$d,
                                                         diag.B.train = encoding$diag.B.train,
@@ -160,14 +159,15 @@ apply_pco_to_column <- function(x, encoding) {
     list_rbind()
   
   var_level_score <- bind_rows(data.frame(encoding$Q) %>% rownames_to_column("level"), new_scores)
-  data.frame(level = x) |> left_join(var_level_score, by="level") |>
-    select(-level)
+  new_cols <- data.frame(level = var) |> left_join(var_level_score, by="level") |> select(-level)
+  new_cols
 }
 
 bake.step_pco <- function(object, new_data, ...) {
   
   col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
+  
   # generate some new names
   new_names <- imap(object$objects, \(x, nm) { paste(nm, "pco", seq_along(x$lambdas_B), sep="_") })
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
@@ -177,7 +177,7 @@ bake.step_pco <- function(object, new_data, ...) {
     i_col <- new_data[[col_name]]
     i_obj <- object$objects[[col_name]]
     if (!is.null(i_obj)) { # only if we need to include this column...
-      new_cols <- apply_pco_to_column(x = i_col, encoding = i_obj)
+      new_cols <- apply_pco_to_column(var = i_col, encoding = i_obj)
       new_col_names <- new_names[[col_name]]
       colnames(new_cols) <- new_col_names
       new_tbl[new_col_names] <- new_cols
