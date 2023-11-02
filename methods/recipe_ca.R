@@ -56,9 +56,10 @@ encode_ca <- function(var, outcome, k) {
   #epsilon <- sqrt(.Machine$double.eps) # in helpers
   
   var <- droplevels(var)
+  #cat("This one has nlevels = ", nlevels(var), "\n")
   if (nlevels(var) < 2) {
     # if we only have one level so we can't do anything
-    return(null)
+    return(NULL)
     }
   ct <- table(level=var, outcome=outcome)
   if(!length(k)) {
@@ -162,7 +163,7 @@ bake.step_ca <- function(object, new_data, ...) {
   check_new_data(col_names, object, new_data)
   
   # generate some new names
-  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca", seq_len(ncol(x$X)), sep="_") })
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca", seq_along(colnames(x$X)), sep="_") })
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
   
   # iterate over and generate our new columns
