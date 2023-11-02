@@ -13,6 +13,8 @@ source("methods/pco.R")
 load("../CAP_data/data/list_of_distance_matrices.RData")
 load("../CAP_data/data/cgMLST_dat.RData") # SACNZ cgMLST data set (jejuni and coli)
 Dat_jc <- cgMLST %>% filter(Source != "Human") %>% droplevels() %>% mutate(across(everything(), factor)) 
+
+# For smaller sample
 #Dat_jc <- Dat_jc |> select(c(1:3, "Source")) |> slice_sample(n=50)
 #list_of_distance_matrices <- list_of_distance_matrices[1:2]
 
@@ -21,6 +23,10 @@ set.seed(3)
 split <- initial_split(Dat_jc)
 jc_train <- training(split)
 jc_test  <- testing(split)
+
+# RIGHT, let's mess with one of them to have variance zero...
+jc_train$CAMP0001 <- rep(jc_train$CAMP0001[1], nrow(jc_train))
+
 
 #### ca with scores, try different values of k
 my_recipe <- 
@@ -99,10 +105,6 @@ foo_test |> as_tibble() |> mutate(across(where(is.numeric), round, 10)) |> anti_
 
 
 #### NOW PCO...
-
-# RIGHT, let's mess with one of them to have variance zero...
-jc_train$CAMP0001 <- rep(jc_train$CAMP0001[1], nrow(jc_train))
-
 my_recipe <- 
   recipe(Source ~ ., data=jc_train) |>
   step_pco(starts_with("CAMP"), distances = list_of_distance_matrices, m=4, mp=99)
