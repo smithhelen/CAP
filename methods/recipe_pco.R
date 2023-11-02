@@ -67,6 +67,7 @@ encode_pco <- function(var, distance, m, mp) {
   
   # use only non-zero eigenvalues
   nlambdas <- sum(eigen_B$values > epsilon)
+  #cat("This one has nlambdas = ", nlambdas, "\n")
   if (nlambdas == 0) {
     # No non-zero eigenvectors
     return(NULL)
@@ -183,6 +184,7 @@ bake.step_pco <- function(object, new_data, ...) {
   
   # generate some new names
   new_names <- imap(object$objects, \(x, nm) { paste(nm, "pco", seq_along(x$lambdas_B), sep="_") })
+  #print(new_names)
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
   
   # iterate over and generate our new columns
