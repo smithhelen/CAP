@@ -31,7 +31,7 @@ prepare_training_ca <- function(data, var_cols, class, k=NULL) {
   var_cols <- dplyr::select(data, all_of(var_cols))
   classes   <- data |> pull(all_of(class))
   # iterate over the variable columns, and convert
-  prepped <- map(var_cols, factor_to_ca_score, class = classes, k=k)
+  prepped <- map(var_cols, factor_to_ca_score, class = classes, k=k) |> compact()
   output <- map(prepped,"output")
   prepped_data <- bind_cols(data.frame(classes) |> setNames(data |> select(all_of(class)) |> colnames()), 
                             map2(output, names(output), ~ .x |> set_names(paste(.y, names(.x), sep="."))))
