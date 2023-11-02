@@ -57,7 +57,7 @@ encode_ca_unbiased <- function(var, outcome, k) {
   var <- droplevels(var)
   if (nlevels(var) < 2) {
     # if we only have one level so we can't do anything
-    return(null)
+    return(NULL)
     }
   ct <- table(level=var, outcome=outcome)
   if(!length(k)) {
@@ -85,13 +85,15 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
   
   # grab the columns we're going to prep
   col_names <- recipes_eval_select(x$terms, training, info)
+  #cat("colnames are ", col_names, "\n")
+  #print(training[, col_names])
   
   # grab the outcome column
   outcome_name <- info |> filter(role == "outcome") |> pull(variable)
   if (length(outcome_name) != 1) {
     rlang::abort("One variable with role 'outcome' is required")
   }
-  
+
   # check the column types are what we want: we want factor variables
   # (or categorical variables?)
   check_type(training[, col_names], types = c("character", "factor"))
@@ -117,7 +119,7 @@ prep.step_ca_unbiased <- function(x, training, info = NULL, ...) {
     training[, col_names], 
     \(var) encode_ca_unbiased(var = var, outcome = training |> pull(outcome_name), k = x$k)
   )
-  
+
   ## Use the constructor function to return the updated object. 
   ## Note that `trained` is now set to TRUE
   
@@ -164,7 +166,7 @@ bake.step_ca_unbiased <- function(object, new_data, ...) {
   check_new_data(col_names, object, new_data)
   
   # generate some new names
-  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca0", seq_len(ncol(x$X)), sep="_") })
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "ca0", seq_along(colnames(x$X)), sep="_") })
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
   
   # iterate over and generate our new columns
