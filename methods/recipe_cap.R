@@ -4,14 +4,17 @@ source('methods/helpers.R')
 
 # constructor function for our recipe step
 step_cap_new <- 
-  function(terms, role, trained, distances, axes, objects, options, skip, id) {
+  function(terms, role, trained, distances, m, mp, k, c, objects, options, skip, id) {
     step(
       subclass = "cap", 
       terms = terms,
       role = role,
       trained = trained,
       distances = distances,
-      axes = axes,
+      m = m,
+      mp = mp,
+      k = k,
+      c = c,
       objects = objects,
       options = options,
       skip = skip,
@@ -26,7 +29,10 @@ step_cap <- function(
     role = NA, 
     trained = FALSE,
     distances,
-    axes = 1,
+    m = NULL,
+    mp = 100,
+    k = NULL,
+    c = NULL,
     objects = NULL, # info from our training data
     skip = FALSE,
     options = list(),
@@ -34,7 +40,7 @@ step_cap <- function(
 ) {
   
   if (TRUE) { #!recipes::is_tune(axes)) { # TODO: Do we need to check for tuning here???
-    axes <- as.integer(axes)
+    m <- as.integer(m)
   }
   add_step(
     recipe, 
@@ -43,7 +49,10 @@ step_cap <- function(
       trained = trained,
       role = role,
       distances = distances,
-      axes = axes,
+      m = m,
+      mp = mp,
+      k = k,
+      c = c,
       objects = objects,
       options = options,
       skip = skip,
@@ -55,36 +64,60 @@ step_cap <- function(
 # Prep step
 
 # CAP scoring function
-encode_cap <- function(x, distance, axes) {
-  epsilon <- sqrt(.Machine$double.eps)
-  
-  x <- droplevels(x)
-  d.train <- distance[levels(x),levels(x),drop=FALSE]
+encode_cap <- function(var, outcome, distance, m, mp, k, c) {
+  var <- droplevels(var)
+  d.train <- distance[levels(var),levels(var),drop=FALSE]
   A.train <- -0.5 * d.train^2
   B.train <- dbl_center(A.train)
   eigen_B <- eigen_decomp(B.train, symmetric=TRUE)
+  
   # use only non-zero eigenvalues
   nlambdas <- sum(eigen_B$values > epsilon)
   if (nlambdas == 0) {
-    # No non-zero eigenvectors, so this variable will be dropped
+    # No non-zero eigenvectors
     return(NULL)
   }
-  # Restrict to a maximum of eigenvectors set by "axes".
-  # TODO: Add alternate limit based on variance explained
-  nlambdas <- min(nlambdas, axes)
+
+  ct <- table(level=var, outcome=outcome)
+  H <- hat(ct, k=k) # restrict ct to k axes, if k is null then k=ncol(ct)-1
+  
+  # Restrict to a maximum of eigenvectors set by "m" or "mp (propG)" (default is mp=100% variation)
+  lambdas_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=m, mp=mp) # restrict by axes or mp
   # Scale eigenvectors
-  lambdas_B <- eigen_B$values[seq_len(nlambdas)]
-  Qo <- eigen_B$vectors
-  Q <- sweep(Qo[, seq_len(nlambdas), drop=FALSE], 2, sqrt(abs(lambdas_B)), "*")
-  list(levels = levels(x),
-       d=distance,
-       Q=Q,
-       diag.B.train = diag(B.train),
-       lambdas_B=lambdas_B,
-       propG = cumsum(lambdas_B)/sum(eigen_B$values))
+  Qo <- eigen_B$vectors[, seq_along(lambdas_B), drop=FALSE]  # note that this is different to the Q score in PCO method which is scaled by the sqrt(abs(lambdas_B))
+  QHQ <- t(Qo) %*% H %*% Qo   # Combine Qo and H to get C_score
+  eigen_QHQ <- eigen_decomp(QHQ, symmetric=TRUE)
+  
+  # select number of axes to retain
+  if(is.null(c)){c <- ncol(ct)-1}
+  lambda_QHQ <- filter_eigenvalues(eigen_QHQ$values, m=c)
+  U <- eigen_QHQ$vectors[,seq_along(lambda_QHQ),drop=FALSE]
+  C_score <- Qo %*% U
+  
+  objects <- list(levels = levels(var),
+                  d=distance,
+                  ct=ct,
+                  H=H,
+                  lambdas_B=lambdas_B,
+                  eigen_B=eigen_B,
+                  nlambdas=nlambdas,
+                  U=U,
+                  Qo=Qo,
+                  QHQ=QHQ,
+                  eigenQHQ=eigen_QHQ,
+                  lambda_QHQ=lambda_QHQ,
+                  C_score=C_score,
+                  diag.B.train = diag(B.train),
+                  propG = cumsum(eigen_B$values)/sum(eigen_B$values)*100)
+  objects
+  #print(objects)
 }
 
 prep.step_cap <- function(x, training, info = NULL, ...) {
+  # x is the object from the step_pco function, 
+  # training is the training set data (tibble),
+  # and info is a tibble that has information on the current set of data eg variable name, type, and role
+  
   # grab the columns we're going to prep
   col_names <- recipes_eval_select(x$terms, training, info)
   
@@ -113,12 +146,19 @@ prep.step_cap <- function(x, training, info = NULL, ...) {
   x$distances <- map(x$distances, as.matrix)
   
   # OK, now do the actual CAP step on each column
-  # This computes the axes etc using the distance matrices
+  # This computes the m etc using the distance matrices.
+  # The actual data transformation
   # of current variables is done in 'prep' or 'bake' not here
   objects <- purrr::map2(
     training[, col_names],
     x$distances[col_names],
-    \(var, dist) encode_cap(x=var, distance = dist, axes = x$axes)
+    \(var, dist) encode_cap(var=var, 
+                            outcome = training |> pull(outcome_name), 
+                            distance = dist, 
+                            m = x$m, 
+                            mp = x$mp, 
+                            k=x$k, 
+                            c=x$c)
   )
   
   ## Use the constructor function to return the updated object. 
@@ -129,7 +169,10 @@ prep.step_cap <- function(x, training, info = NULL, ...) {
     trained = TRUE,
     role = x$role, 
     distances = x$distances,
-    axes = x$axes,
+    m = x$m,
+    mp = x$mp,
+    k = x$k,
+    c = x$c,
     objects = objects,
     options = x$options,
     skip = x$skip,
@@ -138,48 +181,56 @@ prep.step_cap <- function(x, training, info = NULL, ...) {
 }
 
 # Bake step: take our scores and apply them as needed to the columns
-apply_cap_to_column <- function(x, info) {
+apply_cap_to_column <- function(var, encoding) {
   
   # Gower's transformation of new observations into PCO space
-  new_observation_to_pco <- function(new.var_level, d, diag.B.train, Q, lambdas_B) {
+  new_level_to_cap <- function(new.var_level, d, diag.B.train, Qo, lambdas_B, U) {
     d.new <- d[new.var_level, names(diag.B.train)]
     d.gower <- diag.B.train - (d.new ^ 2)
-    newQ <- d.gower %*% Q / (2 * lambdas_B)
-    colnames(newQ) = colnames(Q)
-    new_var_level_score <- data.frame(level = new.var_level, newQ)
+    newQo <- d.gower %*% Qo / (2 * lambdas_B)
+    #for plotting, the canonical variable scores are standardized by the square root of their corresponding eigenvalue (lambda_QHQ). 
+    #this is not necessary for the CAP method per se
+    #newCscore <- newQo %*% U * sqrt(abs(lambda_QHQ))
+    newCscore <- newQo %*% U
+    #colnames(newCscore) = colnames(Qo)
+    new_var_level_score <- data.frame(level = new.var_level, newCscore)
     new_var_level_score
   }
   
-  x <- droplevels(x) # ignore levels we don't have in these data
+  var <- droplevels(var) # ignore levels we don't have in these data
   
   # Now we figure out which levels are new, and which are the usual
-  new_levels <- setdiff(levels(x), info$levels)
-  new_scores <- map(new_levels, ~new_observation_to_pco(new.var_level = {.},
-                                                        d = info$d,
-                                                        diag.B.train = info$diag.B.train,
-                                                        Q = info$Q, 
-                                                        lambdas_B = info$lambdas_B)) |>
+  new_levels <- setdiff(levels(var), encoding$levels)
+  new_scores <- map(new_levels, ~new_level_to_cap(new.var_level = {.},
+                                                  d = encoding$d,
+                                                  diag.B.train = encoding$diag.B.train,
+                                                  Qo = encoding$Qo,
+                                                  lambdas_B = encoding$lambdas_B,
+                                                  U = encoding$U)) |>
     list_rbind()
   
-  var_level_score <- bind_rows(data.frame(info$Q) %>% rownames_to_column("level"), new_scores)
-  data.frame(level = x) |> left_join(var_level_score, by="level") |>
-    select(-level)
+  var_level_score <- bind_rows(data.frame(encoding$C_score) %>% rownames_to_column("level"), new_scores)
+  new_cols <- data.frame(level = var) |> left_join(var_level_score, by="level") |> select(-level)
+  new_cols
 }
 
 bake.step_cap <- function(object, new_data, ...) {
+  # object is the updated step function that has been prepped, 
+  # new_data is a tibble of data to be processed.
   
   col_names <- names(object$objects)
   check_new_data(col_names, object, new_data)
+
   # generate some new names
-  new_names <- imap(object$objects, \(x, nm) { paste(nm, "cap", seq_along(x$lambdas_B), sep="_") })
+  new_names <- imap(object$objects, \(x, nm) { paste(nm, "cap", seq_along(colnames(x$C_score)), sep="_") })
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
-  
+
   # iterate over and generate our new columns
   for (col_name in col_names) {
     i_col <- new_data[[col_name]]
     i_obj <- object$objects[[col_name]]
     if (!is.null(i_obj)) { # only if we need to include this column...
-      new_cols <- apply_cap_to_column(x = i_col, info = i_obj)
+      new_cols <- apply_cap_to_column(var = i_col, encoding = i_obj)
       new_col_names <- new_names[[col_name]]
       colnames(new_cols) <- new_col_names
       new_tbl[new_col_names] <- new_cols
