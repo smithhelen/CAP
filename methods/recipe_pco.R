@@ -184,9 +184,8 @@ bake.step_pco <- function(object, new_data, ...) {
   
   # generate some new names
   new_names <- imap(object$objects, \(x, nm) { paste(nm, "pco", seq_along(x$lambdas_B), sep="_") })
-  #print(new_names)
   new_tbl <- tibble::new_tibble(x = list(), nrow=nrow(new_data))
-  
+
   # iterate over and generate our new columns
   for (col_name in col_names) {
     i_col <- new_data[[col_name]]
