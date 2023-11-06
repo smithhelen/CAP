@@ -3,8 +3,6 @@
 # Load functions
 source("methods/helpers.R")       # Functions used internally in the methods
 
-epsilon <- sqrt(.Machine$double.eps)
-
 # Function to map from variable levels to scores.
 
 # Output is both the score information for the variable (i.e. a vector of the same length as the input vector) and
