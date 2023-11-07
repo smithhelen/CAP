@@ -26,7 +26,7 @@ step_cap_new <-
 step_cap <- function(
     recipe, 
     ..., 
-    role = NA, 
+    role = "predictor", 
     trained = FALSE,
     distances,
     m = NULL,

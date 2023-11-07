@@ -22,7 +22,7 @@ step_ca_new <-
 step_ca <- function(
     recipe, 
     ..., 
-    role = NA, 
+    role = "predictor", 
     trained = FALSE, 
     k = NULL, # defaults to number of classes - 1
     objects = NULL, # scores of levels from the training data

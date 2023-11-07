@@ -24,7 +24,7 @@ step_pco_new <-
 step_pco <- function(
     recipe, 
     ..., 
-    role = NA, 
+    role = "predictor", 
     trained = FALSE,
     distances,
     m = NULL,

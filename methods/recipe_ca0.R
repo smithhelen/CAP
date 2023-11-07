@@ -22,7 +22,7 @@ step_ca_unbiased_new <-
 step_ca_unbiased <- function(
     recipe, 
     ..., 
-    role = NA, 
+    role = "predictor", 
     trained = FALSE, 
     k = NULL, # defaults to number of classes - 1
     objects = NULL, # info from the training data
