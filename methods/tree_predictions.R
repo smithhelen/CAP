@@ -37,15 +37,7 @@ predict_row <- function(tree, data_row, uniques_row) {
     }
     # is our level unique?
     split = tree$splitvarName[row]  #name of var used in tree
-    #cat(split)   # for checking errors
-    #' JM 24th May 2023. When we add new variables in, over and above the categorical one
-    #' that has been dealt with via PCO/Cerda/CA or whatever, then it won't have any
-    #' uniques. So it won't be in uniques_row at all.
-    #' Things that are in uniques_row seem to be named with anything after the first
-    #' dot being removed. If there's no dot, then that's OK, nothing is removed.
-    #' So, we shouldn't name variables with dots in them unless it's intentional
-    #' (e.g. PCO axes etc) that they should be removed again here!
-    #' So, we will check if the named split variable is in the uniques row
+    # check if the named split variable is in the uniques row
     name_of_split_variable <- split %>% sub("\\..*","",.)
     if (name_of_split_variable %in% names(uniques_row) && #' This variable is in the uniques row
         uniques_row[[name_of_split_variable]]) {
@@ -77,7 +69,6 @@ my_treeInfo <- function(mod, tree_number) {
 }
 
 predict_tree <- function(mod, tree_number, nd, nu, id) {
-  #cat("working on tree", tree_number, "\n")
   tree <- my_treeInfo(mod, tree_number)
   out_dfr <- map2_dfr(nd, nu, ~predict_row(tree, .x, .y))
   out_dfr |>
