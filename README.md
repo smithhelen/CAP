@@ -17,7 +17,7 @@ by *HL Smith, PJ Biggs, NP French, ANH Smith,* and *JC Marshall* (2024).
 **To CAP it Off** details new methods for encoding categorical variables for random forest predictive models which are unbiased in the presence of absent levels.
 The CAP-encoding method combines the PCO-encoding and the CA-unbiased-encoding methods for encoding categorical predictor variables, including absent levels.
 
-This repository contains all the code for the methods described in the paper as well as the simulation studies for reproducibility, and example data to apply the methods to the source attribution of *Campylobacter* species.
+This repository contains all the code for the methods and simulation studies described in the paper, as well as example data to apply the methods to the source attribution of *Campylobacter* species.
 
 ### Contents of this repository
 
