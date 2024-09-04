@@ -1,4 +1,4 @@
-## Helper functions for CAP methods
+## Helper functions
 
 epsilon <- sqrt(.Machine$double.eps)
 
@@ -34,11 +34,14 @@ hat <- function(ct, k){
     k <- ncol(ct)-1
   }
   ca1 <- CA(ct, ncp=k, graph=FALSE) #requires FactoMineR
-  capX <- get_ca_row(ca1)$coord #requires factoextra
-  centX <- sweep(as.matrix(capX), 2, colMeans(as.matrix(capX)), '-')
+  nlambda <- min(sum(ca1$eig[,1] > epsilon), k)
+  caX <- get_ca_row(ca1)$coord #equivalent to ca1$svd$U #requires factoextra
+  capX <- as.matrix(caX)[,1:nlambda, drop=FALSE]
+  centX <- sweep(capX, 2, colMeans(capX), '-')
   H <- centX %*% solve(t(centX) %*% centX) %*% t(centX) 
   H
 }
+  
 
 # Filter out eigenvalues based on some criteria
 filter_eigenvalues <- function(ev, m = NULL, mp = 100) {
@@ -46,10 +49,13 @@ filter_eigenvalues <- function(ev, m = NULL, mp = 100) {
     if(!length(mp)){
       mp <- 100
       message(paste("m and mp are NULL, mp defaults to 100"))
-      }
+    }
     VarExp <- cumsum(ev/sum(ev)*100)
-    m <- min(which(VarExp >= mp)) 
-    #m <- min(which(round(VarExp,0) >= mp)) #round to avoid error (when rounding error makes it not quite 100, leading to Inf)
+    if(mp==100){
+      m <- min(which(round(VarExp,0) >= mp)) #round to avoid error (when rounding error makes it not quite 100, leading to Inf)
+    } else {
+      m <- min(which(VarExp >= mp)) 
+    }
   }
   m <- min(m, length(ev))
   ev[seq_len(m)]
