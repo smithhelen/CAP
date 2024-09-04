@@ -13,13 +13,10 @@ CAP combines the PCO and CA methods for random forest models
 
 This repository is to accompany the manuscript 
 **“CAP”**
-by *HL Smith, PJ Biggs, NP French, ANH Smith,* and *JC Marshall* (2023).
-**CAP** details new methods for random forest predictive
-models which are unbiased in the presence of absent levels.
+by *HL Smith, PJ Biggs, NP French, ANH Smith,* and *JC Marshall* (2024).
+**CAP** details new methods for encoding categorical variables for random forest predictive models which are unbiased in the presence of absent levels.
 
-This repository contains all the code for the methods described in
-the paper as well as example data to apply the methods to the source
-attribution of *Campylobacter* species.
+This repository contains all the code for the methods described in the paper as well as the simulation studies for reproducibility.
 
 ### Contents of this repository
 
@@ -33,6 +30,7 @@ The key contents are organised as follows:
         -   SeqDat.Rdata
     -   files
         -   sample_run.R
+        -   simulation_cap
     -   methods
         -   ca.R
         -   ca_unbiased.R
