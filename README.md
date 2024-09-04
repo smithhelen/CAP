@@ -38,6 +38,10 @@ The key contents are organised as follows:
         -   cap.R
         -   hamming.R
         -   helpers.R
+        -   recipe_ca0.R
+        -   recipe_pco.R
+        -   recipe_cap.R
+
 
 The R project is called `CAP.Rproj`.
 
