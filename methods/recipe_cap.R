@@ -79,7 +79,7 @@ encode_cap <- function(var, outcome, distance, ck, cm, cmp, c) {
   }
 
   ct <- table(level=var, outcome=outcome)
-  H <- hat(ct, k=ck) # restrict ct to ck axes, if ck is null then ck=ncol(ct)-1
+  H <- hat_fn(ct, k=ck) # restrict ct to ck axes, if ck is null then ck=ncol(ct)-1
   
   # Restrict to a maximum of eigenvectors set by "cm" or "cmp (propG)" (default is cmp=100% variation)
   lambdas_B <- filter_eigenvalues(eigen_B$values[seq_len(nlambdas)], m=cm, mp=cmp) # restrict by axes or cmp

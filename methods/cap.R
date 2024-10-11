@@ -28,7 +28,7 @@ factor_to_CAP_score <- function(var, dist, class, ck, cm, cmp, c) {
   lambdas_B <- filter_eigenvalues(ev, m=cm, mp=cmp) # subset PCO axes by cm or cmp (cm takes priority)
   Qo <- eigen_B$vectors[, seq_along(lambdas_B), drop=FALSE]  # note that this is different to the Q score in PCO method which is scaled by the sqrt(abs(lambdas_B))
   ct <- table(Var_level=var_levels, Class=class)
-  H <- hat(ct, k=ck) # restrict ct to ck axes, if ck is null then ck=ncol(ct)-1
+  H <- hat_fn(ct, k=ck) # restrict ct to ck axes, if ck is null then ck=ncol(ct)-1
   QHQ <- t(Qo) %*% H %*% Qo   # Combine Qo and H to get C_score
   eigen_QHQ <- eigen_decomp(QHQ, symmetric=TRUE)
   # select number of axes to retain - default is number of pco axes (NOTE CHANGE, used to be number of k axes)

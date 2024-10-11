@@ -29,7 +29,7 @@ eigen_decomp <- function(X, symmetric) {
 }
 
 # Hat function
-hat <- function(ct, k){
+hat_fn <- function(ct, k){
   if(!length(k)){
     k <- ncol(ct)-1
   }
