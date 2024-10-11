@@ -44,7 +44,7 @@ train <- prepare_training_ca0(Dat.train, starts_with("Var"), "class")
 test <- prepare_test_ca0(Dat.test, train$extra, "id")
 
 # 2. pco method
-train <- prepare_training_pco(Dat.train, starts_with("Var"), "class", d=list_of_distance_matrices, mp=99)
+train <- prepare_training_pco(Dat.train, starts_with("Var"), "class", d=list_of_distance_matrices, mp=95)
 test <- prepare_test_pco(Dat.test, train$extra, "id")
 
 # 3. cap method
