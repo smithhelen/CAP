@@ -11,7 +11,7 @@ CAP
 
 
 This repository is to accompany the manuscript 
-**“To CAP it Off - Encoding Categorical Variables using Canonical Analysis of Principal Coordinates”**
+**“CAP-encoding: Encoding Categorical Variables using Canonical Analysis of Principal Coordinates”**
 by *HL Smith, PJ Biggs, NP French, ANH Smith,* and *JC Marshall* (2024).
 
 **To CAP it Off** details new methods for encoding categorical variables for random forest predictive models which are unbiased in the presence of absent levels.
