@@ -11,10 +11,10 @@ CAP
 
 
 This repository is to accompany the manuscript 
-**“To CAP it Off - Encoding Categorical Variables using Canonical Analysis of Principal Coordinates”**
+**“CAP-encoding: Encoding Categorical Variables using Canonical Analysis of Principal Coordinates”**
 by *HL Smith, PJ Biggs, NP French, ANH Smith,* and *JC Marshall* (2024).
 
-**To CAP it Off** details new methods for encoding categorical variables for random forest predictive models which are unbiased in the presence of absent levels.
+**CAP** details new methods for encoding categorical variables for random forest predictive models which are unbiased in the presence of absent levels.
 The CAP-encoding method combines the PCO-encoding and the CA-unbiased-encoding methods for encoding categorical predictor variables, including absent levels.
 
 This repository contains all the code for the methods and simulation studies described in the paper, as well as example data to apply the methods to the source attribution of *Campylobacter* species.
